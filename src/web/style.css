@@ -1,2 +1,103 @@
-/* Placeholder: gaya halaman dibuat di tahap 4. */
-body { font-family: system-ui, sans-serif; margin: 2rem; color: #222; }
+/* Gaya halaman Simple Orders: warna netral, satu kolom, responsif. */
+:root {
+  --latar: #f5f5f4;
+  --kartu: #ffffff;
+  --teks: #1c1917;
+  --redup: #78716c;
+  --garis: #e7e5e4;
+  --utama: #44403c;
+  --utama-teks: #ffffff;
+  --bahaya: #b91c1c;
+  --sukses: #166534;
+}
+
+@media (prefers-color-scheme: dark) {
+  :root {
+    --latar: #1c1917;
+    --kartu: #292524;
+    --teks: #f5f5f4;
+    --redup: #a8a29e;
+    --garis: #44403c;
+    --utama: #d6d3d1;
+    --utama-teks: #1c1917;
+    --bahaya: #f87171;
+    --sukses: #4ade80;
+  }
+}
+
+* { box-sizing: border-box; }
+[hidden] { display: none !important; } /* jangan kalah oleh display: flex/grid */
+
+body {
+  margin: 0;
+  background: var(--latar);
+  color: var(--teks);
+  font: 16px/1.5 system-ui, -apple-system, "Segoe UI", sans-serif;
+}
+
+.wadah { max-width: 640px; margin: 0 auto; padding: 24px 16px 48px; }
+
+header { margin-bottom: 16px; }
+h1 { margin: 0; font-size: 1.6rem; }
+h2 { margin: 0 0 12px; font-size: 1.05rem; }
+.sub { margin: 0; color: var(--redup); }
+
+.kartu {
+  background: var(--kartu);
+  border: 1px solid var(--garis);
+  border-radius: 10px;
+  padding: 16px;
+  margin-bottom: 16px;
+}
+
+label { display: block; margin-bottom: 12px; font-size: 0.9rem; color: var(--redup); }
+
+input, select {
+  display: block;
+  width: 100%;
+  margin-top: 4px;
+  padding: 8px 10px;
+  font: inherit;
+  color: var(--teks);
+  background: var(--kartu);
+  border: 1px solid var(--garis);
+  border-radius: 6px;
+}
+
+input:focus, select:focus, button:focus-visible { outline: 2px solid var(--utama); outline-offset: 1px; }
+
+button {
+  padding: 8px 16px;
+  font: inherit;
+  color: var(--utama-teks);
+  background: var(--utama);
+  border: 0;
+  border-radius: 6px;
+  cursor: pointer;
+}
+button:disabled { opacity: 0.5; cursor: not-allowed; }
+button.bahaya { background: var(--bahaya); color: #fff; }
+
+/* Dua kolom di layar lebar, satu kolom di HP */
+.grid { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
+.sebaris { display: flex; gap: 8px; }
+.sebaris input { margin-top: 0; }
+.aksi { display: flex; gap: 8px; margin-top: 12px; }
+
+@media (max-width: 480px) {
+  .grid { grid-template-columns: 1fr; gap: 0; }
+}
+
+/* Kotak hasil */
+.hasil { color: var(--redup); overflow-wrap: anywhere; }
+.hasil.sukses { color: var(--sukses); }
+.hasil.error { color: var(--bahaya); }
+.hasil .judul { margin: 0 0 8px; font-weight: 600; color: var(--teks); }
+
+dl { display: grid; grid-template-columns: max-content 1fr; gap: 4px 16px; margin: 0; color: var(--teks); }
+dt { color: var(--redup); }
+dd { margin: 0; }
+code { font-size: 0.9em; }
+
+.label-status { padding: 1px 8px; border-radius: 999px; border: 1px solid var(--garis); font-size: 0.85em; }
+.label-status.done { color: var(--sukses); border-color: currentColor; }
