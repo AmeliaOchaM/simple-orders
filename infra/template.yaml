@@ -12,10 +12,10 @@ Parameters:
     Description: Nama tabel DynamoDB untuk menyimpan pesanan.
   CodeBucket:
     Type: String
-    Description: Bucket S3 tempat zip kode OrdersFn diunggah.
+    Description: Bucket S3 tempat zip kode (folder src/) diunggah.
   CodeKey:
     Type: String
-    Description: Nama objek (key) zip kode OrdersFn di bucket S3.
+    Description: Nama objek (key) zip kode di bucket S3. Dipakai kedua Lambda.
   KeyPelanggan:
     Type: String
     NoEcho: true
@@ -31,80 +31,20 @@ Resources:
   # ---------------------------------------------------------------------------
   # Lambda kecil yang membuat (dan menghapus) tabel DynamoDB.
   # Memakai role bawaan LabRole karena kita tidak bisa membuat IAM role.
-  # Kode ditulis inline (ZipFile) supaya tidak perlu diunggah ke S3.
+  # Kode dari zip yang sama dengan OrdersFn: src/handlers/setupDatabase.js
   # ---------------------------------------------------------------------------
   TableCreatorFn:
     Type: AWS::Lambda::Function
     Properties:
       Description: Membuat tabel DynamoDB untuk Simple Orders (Custom Resource).
       Runtime: nodejs22.x
-      Handler: index.handler
+      Handler: handlers/setupDatabase.handler
       Role: !Sub arn:aws:iam::${AWS::AccountId}:role/LabRole
       Timeout: 120
       MemorySize: 128
       Code:
-        ZipFile: |
-          // TableCreator: dipanggil CloudFormation saat Create/Update/Delete.
-          const https = require('https');
-          const {
-            DynamoDBClient, CreateTableCommand, DeleteTableCommand, waitUntilTableExists
-          } = require('@aws-sdk/client-dynamodb');
-          const db = new DynamoDBClient({});
-
-          // Kirim hasil (SUCCESS/FAILED) ke CloudFormation lewat URL S3 bertanda tangan.
-          function kirim(event, context, status, idFisik, alasan) {
-            const body = JSON.stringify({
-              Status: status,
-              Reason: alasan || 'Lihat log CloudWatch: ' + context.logStreamName,
-              PhysicalResourceId: idFisik,
-              StackId: event.StackId,
-              RequestId: event.RequestId,
-              LogicalResourceId: event.LogicalResourceId
-            });
-            return new Promise((resolve) => {
-              const req = https.request(event.ResponseURL, {
-                method: 'PUT',
-                headers: { 'Content-Type': '', 'Content-Length': Buffer.byteLength(body) }
-              }, (res) => { res.resume(); res.on('end', resolve); });
-              req.on('error', (e) => { console.error('Gagal kirim respons:', e.message); resolve(); });
-              req.end(body);
-            });
-          }
-
-          exports.handler = async (event, context) => {
-            console.log('Permintaan:', event.RequestType, event.LogicalResourceId);
-            const nama = event.ResourceProperties.TableName;
-            try {
-              if (event.RequestType === 'Delete') {
-                // Stack dihapus: hapus tabel. Abaikan jika tabel sudah tidak ada.
-                try {
-                  await db.send(new DeleteTableCommand({ TableName: event.PhysicalResourceId }));
-                } catch (e) {
-                  if (e.name !== 'ResourceNotFoundException') throw e;
-                }
-                return await kirim(event, context, 'SUCCESS', event.PhysicalResourceId);
-              }
-
-              // Create/Update: buat tabel jika belum ada (idempoten).
-              try {
-                await db.send(new CreateTableCommand({
-                  TableName: nama,
-                  BillingMode: 'PAY_PER_REQUEST',
-                  AttributeDefinitions: [{ AttributeName: 'orderId', AttributeType: 'S' }],
-                  KeySchema: [{ AttributeName: 'orderId', KeyType: 'HASH' }]
-                }));
-              } catch (e) {
-                if (e.name !== 'ResourceInUseException') throw e;
-                console.log('Tabel sudah ada, dipakai ulang:', nama);
-              }
-              // Tunggu sampai tabel ACTIVE sebelum melapor sukses.
-              await waitUntilTableExists({ client: db, maxWaitTime: 90 }, { TableName: nama });
-              await kirim(event, context, 'SUCCESS', nama);
-            } catch (e) {
-              console.error('Gagal:', e.name, e.message);
-              await kirim(event, context, 'FAILED', event.PhysicalResourceId || nama, e.name + ': ' + e.message);
-            }
-          };
+        S3Bucket: !Ref CodeBucket
+        S3Key: !Ref CodeKey
 
   # ---------------------------------------------------------------------------
   # Custom Resource: meminta TableCreatorFn membuat tabel.
@@ -118,6 +58,7 @@ Resources:
 
   # ---------------------------------------------------------------------------
   # Lambda utama: API pesanan + halaman web. Log otomatis ke CloudWatch.
+  # Kode: src/index.js (zip yang sama dengan TableCreatorFn).
   # ---------------------------------------------------------------------------
   OrdersFn:
     Type: AWS::Lambda::Function
