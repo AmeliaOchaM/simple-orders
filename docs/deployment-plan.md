@@ -92,6 +92,14 @@ aws lambda invoke --function-name <OrdersFn> --cli-binary-format raw-in-base64-o
    ```bash
    aws dynamodb scan --table-name orders --select COUNT
    ```
+6. **Persistensi setelah restart** (lihat bagian 6A):
+   ```bash
+   bash scripts/test-persistence.sh       # harap: HASIL: LULUS
+   ```
+7. **Failure/recovery** (lihat bagian 5, skenario uji):
+   ```bash
+   bash scripts/test-failure-recovery.sh  # harap: HASIL: LULUS
+   ```
 
 ## 5. Rollback bila gagal
 
@@ -105,11 +113,31 @@ aws lambda invoke --function-name <OrdersFn> --cli-binary-format raw-in-base64-o
 | Kode baru bermasalah | Unggah kode versi sebelumnya: `git checkout <commit-lama> -- src && bash scripts/deploy.sh`, lalu kembalikan dengan `git checkout HEAD -- src`. Data di tabel tidak terpengaruh. |
 | Semua kacau | `RETAIN=true bash scripts/teardown.sh`, lalu `bash scripts/deploy.sh`. Data tetap ada. Tanpa `RETAIN=true`, tabel ikut terhapus. |
 
+### Skenario uji failure/recovery: kode rusak ter-deploy
+
+Skenario ini menyimulasikan kesalahan yang paling mungkin terjadi: kode yang salah ikut ter-deploy. Jalankan:
+
+```bash
+bash scripts/test-failure-recovery.sh
+```
+
+| Langkah | Yang terjadi | Bukti |
+|---|---|---|
+| 1. Normal | Pesanan dibuat | HTTP 201 |
+| 2. Failure | Kode rusak (setiap permintaan melempar error) diunggah ke `OrdersFn` | API membalas HTTP 502 |
+| 3. Deteksi | Error tercatat di CloudWatch Logs | baris log `SIMULASI_FAILURE` |
+| 4. Recovery | `deploy.sh` mengunggah ulang kode yang benar | deploy selesai |
+| 5. Pulih | Pesanan dari langkah 1 diambil lagi | HTTP 200, data utuh |
+
+Data tidak hilang karena kegagalan hanya ada di lapisan kode (Lambda), sedangkan data ada di DynamoDB. Bila skrip berhenti di tengah jalan, skrip otomatis menjalankan `deploy.sh` supaya kode rusak tidak tertinggal. Hasilnya tersimpan di `out/failure-recovery-<waktu>.txt`.
+
 ## 6. Skenario persistensi
 
 ### A. Lambda di-restart: data tetap ada
 
 Data disimpan di DynamoDB, bukan di memori Lambda. Jadi instance Lambda baru (cold start) tidak menghapus pesanan.
+
+Cara cepat: `bash scripts/test-persistence.sh` menjalankan langkah di bawah secara otomatis (restart lewat `update-function-code`) dan menyimpan hasilnya ke `out/persistensi-<waktu>.txt`. Langkah manualnya:
 
 ```bash
 source .env
@@ -181,6 +209,7 @@ Bila teardown dijalankan **tanpa** `RETAIN=true`, `teardown.sh` lebih dulu meman
 - [ ] Halaman web: pesan error, misalnya `Error 401` dengan kunci salah
 - [ ] Output `bash scripts/test-api.sh`: `Total: 10 tes, 10 OK, 0 GAGAL`
 - [ ] CloudWatch Logs `OrdersFn`: baris log JSON tanpa kunci API
-- [ ] Skenario A: HTTP 200 setelah deploy ulang (restart Lambda)
+- [ ] Skenario A: output `bash scripts/test-persistence.sh` sampai `HASIL: LULUS`
+- [ ] Failure/recovery: output `bash scripts/test-failure-recovery.sh` sampai `HASIL: LULUS`, plus CloudWatch Logs dengan filter `SIMULASI_FAILURE`
 - [ ] Skenario B: output `RETAIN=true bash scripts/teardown.sh`, lalu HTTP 200 setelah deploy ulang
 - [ ] Output `bash scripts/teardown.sh` (tabel dan stack terhapus)
