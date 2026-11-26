@@ -1,0 +1,13 @@
+# Python
+__pycache__/
+.pytest_cache/
+
+# File build
+build/
+*.zip
+
+# Rahasia (kunci API) - jangan pernah di-commit
+.env
+
+# Hasil tes
+out/
