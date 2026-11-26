@@ -22,7 +22,7 @@ const ATURAN = {
 // Cek field yang tidak dikenal, field wajib, lalu aturan tiap field.
 function cekField(data, boleh, wajib) {
   for (const k of Object.keys(data)) {
-    if (!boleh.includes(k)) return `Field "${k}" tidak boleh diisi`;
+    if (!boleh.includes(k)) return `Field "${k}" tidak boleh diisi (yang boleh: ${boleh.join(', ')})`;
   }
   for (const k of wajib) {
     if (!(k in data)) return `Field "${k}" wajib diisi`;

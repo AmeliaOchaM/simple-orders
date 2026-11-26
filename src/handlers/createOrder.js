@@ -17,6 +17,10 @@ module.exports = async (event) => {
     status: 'pending',
     createdAt: new Date().toISOString(),
   };
-  await db.send(new PutCommand({ TableName: TABLE_NAME, Item: pesanan }));
+  await db.send(new PutCommand({
+    TableName: TABLE_NAME,
+    Item: pesanan,
+    ConditionExpression: 'attribute_not_exists(orderId)', // jangan pernah menimpa pesanan lain
+  }));
   return json(201, pesanan);
 };
