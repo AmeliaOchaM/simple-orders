@@ -1,0 +1,9 @@
+{
+  "name": "simple-orders",
+  "version": "1.0.0",
+  "description": "Pencatatan pesanan kantin dengan AWS Lambda Function URL dan DynamoDB",
+  "private": true,
+  "scripts": {
+    "test": "node --test tests/*.test.js"
+  }
+}
