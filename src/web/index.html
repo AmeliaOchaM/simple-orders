@@ -13,70 +13,48 @@
       <p class="sub">Pencatatan pesanan kantin</p>
     </header>
 
-    <!-- Akses: role menentukan form yang tampil, kunci API dikirim sebagai X-Api-Key -->
+    <!-- Akses: kunci API dikirim sebagai header X-Api-Key -->
     <section class="kartu">
       <h2>Akses</h2>
-      <div class="grid">
-        <label>Role
-          <select id="role">
-            <option value="pelanggan">Pelanggan</option>
-            <option value="penjual">Penjual</option>
-          </select>
-        </label>
-        <label>Kunci API
-          <input id="kunci" type="password" autocomplete="off" placeholder="Tempel kunci API">
-        </label>
-      </div>
+      <label>Kunci API
+        <input id="kunci" type="password" autocomplete="off" placeholder="Tempel kunci API">
+      </label>
     </section>
 
-    <!-- Panel pelanggan -->
-    <div id="panel-pelanggan">
-      <section class="kartu">
-        <h2>Buat pesanan</h2>
-        <form id="form-buat">
-          <label>Nama pemesan
-            <input id="buat-nama" maxlength="100" required>
+    <section class="kartu">
+      <h2>Buat pesanan</h2>
+      <form id="form-buat">
+        <label>Nama pemesan
+          <input id="buat-nama" maxlength="100" required>
+        </label>
+        <div class="grid">
+          <label>Menu
+            <input id="buat-menu" maxlength="100" required>
           </label>
-          <div class="grid">
-            <label>Menu
-              <input id="buat-menu" maxlength="100" required>
-            </label>
-            <label>Jumlah
-              <input id="buat-jumlah" type="number" min="1" step="1" value="1" required>
-            </label>
-          </div>
-          <button type="submit">Buat pesanan</button>
-        </form>
-      </section>
-
-      <section class="kartu">
-        <h2>Cek pesanan</h2>
-        <form id="form-cek" class="sebaris">
-          <input id="cek-id" placeholder="ID pesanan" required>
-          <button type="submit">Cek</button>
-        </form>
-      </section>
-    </div>
-
-    <!-- Panel penjual -->
-    <div id="panel-penjual" hidden>
-      <section class="kartu">
-        <h2>Kelola pesanan</h2>
-        <form id="form-cari" class="sebaris">
-          <input id="cari-id" placeholder="ID pesanan" required>
-          <button type="submit">Cari</button>
-        </form>
-        <div id="aksi-penjual" class="aksi" hidden>
-          <button id="btn-selesai" type="button">Tandai selesai</button>
-          <button id="btn-hapus" type="button" class="bahaya">Hapus</button>
+          <label>Jumlah
+            <input id="buat-jumlah" type="number" min="1" step="1" value="1" required>
+          </label>
         </div>
-      </section>
-    </div>
+        <button type="submit">Buat pesanan</button>
+      </form>
+    </section>
 
-    <!-- Hasil / pesan error dari API -->
+    <section class="kartu">
+      <h2>Cek pesanan</h2>
+      <form id="form-cek" class="sebaris">
+        <input id="cek-id" placeholder="ID pesanan" required>
+        <button type="submit">Cek</button>
+      </form>
+    </section>
+
+    <!-- Hasil / pesan error dari API. Tombol aksi muncul setelah "Cek" berhasil. -->
     <section class="kartu">
       <h2>Hasil</h2>
       <div id="hasil" class="hasil" aria-live="polite">Belum ada permintaan.</div>
+      <div id="aksi-pesanan" class="aksi" hidden>
+        <button id="btn-selesai" type="button">Tandai diterima</button>
+        <button id="btn-hapus" type="button" class="bahaya">Batalkan</button>
+      </div>
     </section>
   </main>
 

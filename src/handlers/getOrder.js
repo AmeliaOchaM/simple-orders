@@ -1,4 +1,4 @@
-// GET /orders/{id} - pelanggan & penjual melihat satu pesanan.
+// GET /orders/{id} - pembeli melihat satu pesanan.
 const { db, TABLE_NAME, GetCommand } = require('../utils/dynamodb');
 const { validasiId } = require('../utils/validate');
 const { json, gagal } = require('../utils/response');

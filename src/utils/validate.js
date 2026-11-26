@@ -39,13 +39,13 @@ function validasiId(id) {
   return POLA_UUID.test(id || '') ? null : 'ID pesanan tidak valid (harus UUID)';
 }
 
-// POST /orders: pelanggan hanya mengisi nama, item, dan jumlah. Status selalu pending.
+// POST /orders: pembeli hanya mengisi nama, item, dan jumlah. Status selalu pending.
 function validasiBuat(data) {
   const field = ['customerName', 'item', 'quantity'];
   return cekField(data, field, field);
 }
 
-// PUT /orders/{id}: penjual boleh mengubah sebagian field, minimal satu.
+// PUT /orders/{id}: pembeli boleh mengubah sebagian field, minimal satu.
 function validasiUbah(data) {
   if (Object.keys(data).length === 0) return 'Minimal satu field harus diubah';
   return cekField(data, ['customerName', 'item', 'quantity', 'status'], []);

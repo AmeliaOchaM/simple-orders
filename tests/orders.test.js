@@ -99,10 +99,8 @@ require.cache[path.join(ROOT, 'src/utils/dynamodb.js')] = {
 
 // ---------- Siapkan handler ----------
 
-const KUNCI_PELANGGAN = 'kunci-pelanggan-rahasia-111';
-const KUNCI_PENJUAL = 'kunci-penjual-rahasia-222';
-process.env.KEY_PELANGGAN = KUNCI_PELANGGAN;
-process.env.KEY_PENJUAL = KUNCI_PENJUAL;
+const KUNCI_PEMBELI = 'kunci-pembeli-rahasia-111';
+process.env.KEY_PEMBELI = KUNCI_PEMBELI;
 
 const { handler } = require(path.join(ROOT, 'src/index.js'));
 
@@ -129,7 +127,7 @@ const PESANAN = { customerName: 'Budi', item: 'Nasi goreng', quantity: 2 };
 const ID_TIDAK_ADA = '00000000-0000-4000-8000-000000000000';
 
 async function buatPesanan() {
-  const { data } = await panggil('POST', '/orders', KUNCI_PELANGGAN, PESANAN);
+  const { data } = await panggil('POST', '/orders', KUNCI_PEMBELI, PESANAN);
   return data.orderId;
 }
 
@@ -176,7 +174,7 @@ test('401 didahulukan sebelum 404 rute', async () => {
 
 test('header X-Api-Key tidak peka huruf besar/kecil', async () => {
   const ev = permintaan('GET', `/orders/${ID_TIDAK_ADA}`);
-  ev.headers = { 'X-API-KEY': KUNCI_PENJUAL };
+  ev.headers = { 'X-API-KEY': KUNCI_PEMBELI };
   const res = await handler(ev);
   assert.equal(res.statusCode, 404);
 });
@@ -184,35 +182,15 @@ test('header X-Api-Key tidak peka huruf besar/kecil', async () => {
 // ---------- 404 rute ----------
 
 test('404 rute tidak ada', async () => {
-  assert.equal((await panggil('GET', '/menu', KUNCI_PENJUAL)).status, 404);
-  assert.equal((await panggil('PATCH', `/orders/${ID_TIDAK_ADA}`, KUNCI_PENJUAL)).status, 404);
-  assert.equal((await panggil('GET', '/orders', KUNCI_PENJUAL)).status, 404);
-});
-
-// ---------- 403 ----------
-
-test('403 penjual tidak boleh POST', async () => {
-  const r = await panggil('POST', '/orders', KUNCI_PENJUAL, PESANAN);
-  assert.equal(r.status, 403);
-  assert.equal(tabel.size, 0);
-});
-
-test('403 pelanggan tidak boleh PUT dan DELETE', async () => {
-  const id = await buatPesanan();
-  assert.equal((await panggil('PUT', `/orders/${id}`, KUNCI_PELANGGAN, { status: 'done' })).status, 403);
-  assert.equal((await panggil('DELETE', `/orders/${id}`, KUNCI_PELANGGAN)).status, 403);
-  assert.equal(tabel.get(id).status, 'pending'); // tidak berubah
-});
-
-test('403 didahulukan sebelum 400 (body rusak)', async () => {
-  const r = await panggil('POST', '/orders', KUNCI_PENJUAL, '{rusak');
-  assert.equal(r.status, 403);
+  assert.equal((await panggil('GET', '/menu', KUNCI_PEMBELI)).status, 404);
+  assert.equal((await panggil('PATCH', `/orders/${ID_TIDAK_ADA}`, KUNCI_PEMBELI)).status, 404);
+  assert.equal((await panggil('GET', '/orders', KUNCI_PEMBELI)).status, 404);
 });
 
 // ---------- Alur utama ----------
 
-test('201 pelanggan membuat pesanan: field server terisi', async () => {
-  const r = await panggil('POST', '/orders', KUNCI_PELANGGAN, { customerName: '  Budi  ', item: 'Es teh', quantity: 3 });
+test('201 pembeli membuat pesanan: field server terisi', async () => {
+  const r = await panggil('POST', '/orders', KUNCI_PEMBELI, { customerName: '  Budi  ', item: 'Es teh', quantity: 3 });
   assert.equal(r.status, 201);
   assert.match(r.data.orderId, /^[0-9a-f-]{36}$/);
   assert.equal(r.data.customerName, 'Budi'); // spasi dibuang
@@ -221,30 +199,28 @@ test('201 pelanggan membuat pesanan: field server terisi', async () => {
   assert.deepEqual(tabel.get(r.data.orderId), r.data);
 });
 
-test('200 pelanggan dan penjual bisa GET pesanan', async () => {
+test('200 pembeli bisa GET pesanan', async () => {
   const id = await buatPesanan();
-  for (const kunci of [KUNCI_PELANGGAN, KUNCI_PENJUAL]) {
-    const r = await panggil('GET', `/orders/${id}`, kunci);
-    assert.equal(r.status, 200);
-    assert.equal(r.data.orderId, id);
-  }
+  const r = await panggil('GET', `/orders/${id}`, KUNCI_PEMBELI);
+  assert.equal(r.status, 200);
+  assert.equal(r.data.orderId, id);
 });
 
-test('200 penjual menandai selesai dan mengubah isi', async () => {
+test('200 pembeli menandai selesai dan mengubah isi', async () => {
   const id = await buatPesanan();
-  const r = await panggil('PUT', `/orders/${id}`, KUNCI_PENJUAL, { status: 'done', quantity: 5 });
+  const r = await panggil('PUT', `/orders/${id}`, KUNCI_PEMBELI, { status: 'done', quantity: 5 });
   assert.equal(r.status, 200);
   assert.equal(r.data.status, 'done');
   assert.equal(r.data.quantity, 5);
   assert.equal(r.data.item, PESANAN.item); // field lain tetap
 });
 
-test('200 penjual menghapus pesanan, lalu GET jadi 404', async () => {
+test('200 pembeli menghapus pesanan, lalu GET jadi 404', async () => {
   const id = await buatPesanan();
-  const r = await panggil('DELETE', `/orders/${id}`, KUNCI_PENJUAL);
+  const r = await panggil('DELETE', `/orders/${id}`, KUNCI_PEMBELI);
   assert.equal(r.status, 200);
   assert.equal(r.data.orderId, id);
-  assert.equal((await panggil('GET', `/orders/${id}`, KUNCI_PENJUAL)).status, 404);
+  assert.equal((await panggil('GET', `/orders/${id}`, KUNCI_PEMBELI)).status, 404);
 });
 
 // ---------- 400 validasi ----------
@@ -266,7 +242,7 @@ test('400 validasi POST', async () => {
     [{ ...PESANAN, orderId: ID_TIDAK_ADA }, /orderId.*tidak boleh/],
   ];
   for (const [body, pesan] of kasus) {
-    const r = await panggil('POST', '/orders', KUNCI_PELANGGAN, body);
+    const r = await panggil('POST', '/orders', KUNCI_PEMBELI, body);
     assert.equal(r.status, 400, JSON.stringify(body));
     assert.match(r.data.error, pesan, JSON.stringify(body));
   }
@@ -274,7 +250,7 @@ test('400 validasi POST', async () => {
 });
 
 test('batas panjang teks: 100 karakter boleh', async () => {
-  const r = await panggil('POST', '/orders', KUNCI_PELANGGAN, { ...PESANAN, item: 'x'.repeat(100) });
+  const r = await panggil('POST', '/orders', KUNCI_PEMBELI, { ...PESANAN, item: 'x'.repeat(100) });
   assert.equal(r.status, 201);
 });
 
@@ -288,7 +264,7 @@ test('400 validasi PUT', async () => {
     [{ orderId: ID_TIDAK_ADA }, /orderId.*tidak boleh/],
   ];
   for (const [body, pesan] of kasus) {
-    const r = await panggil('PUT', `/orders/${id}`, KUNCI_PENJUAL, body);
+    const r = await panggil('PUT', `/orders/${id}`, KUNCI_PEMBELI, body);
     assert.equal(r.status, 400, JSON.stringify(body));
     assert.match(r.data.error, pesan, JSON.stringify(body));
   }
@@ -296,22 +272,22 @@ test('400 validasi PUT', async () => {
 });
 
 test('400 ID bukan UUID (GET, PUT, DELETE)', async () => {
-  assert.equal((await panggil('GET', '/orders/abc', KUNCI_PELANGGAN)).status, 400);
-  assert.equal((await panggil('PUT', '/orders/abc', KUNCI_PENJUAL, { status: 'done' })).status, 400);
-  assert.equal((await panggil('DELETE', '/orders/abc', KUNCI_PENJUAL)).status, 400);
+  assert.equal((await panggil('GET', '/orders/abc', KUNCI_PEMBELI)).status, 400);
+  assert.equal((await panggil('PUT', '/orders/abc', KUNCI_PEMBELI, { status: 'done' })).status, 400);
+  assert.equal((await panggil('DELETE', '/orders/abc', KUNCI_PEMBELI)).status, 400);
 });
 
 test('400 didahulukan sebelum 404 pesanan', async () => {
-  const r = await panggil('PUT', `/orders/${ID_TIDAK_ADA}`, KUNCI_PENJUAL, { status: 'salah' });
+  const r = await panggil('PUT', `/orders/${ID_TIDAK_ADA}`, KUNCI_PEMBELI, { status: 'salah' });
   assert.equal(r.status, 400);
 });
 
 // ---------- 404 pesanan tidak ada ----------
 
 test('404 pesanan tidak ada (GET, PUT, DELETE)', async () => {
-  assert.equal((await panggil('GET', `/orders/${ID_TIDAK_ADA}`, KUNCI_PELANGGAN)).status, 404);
-  assert.equal((await panggil('PUT', `/orders/${ID_TIDAK_ADA}`, KUNCI_PENJUAL, { status: 'done' })).status, 404);
-  assert.equal((await panggil('DELETE', `/orders/${ID_TIDAK_ADA}`, KUNCI_PENJUAL)).status, 404);
+  assert.equal((await panggil('GET', `/orders/${ID_TIDAK_ADA}`, KUNCI_PEMBELI)).status, 404);
+  assert.equal((await panggil('PUT', `/orders/${ID_TIDAK_ADA}`, KUNCI_PEMBELI, { status: 'done' })).status, 404);
+  assert.equal((await panggil('DELETE', `/orders/${ID_TIDAK_ADA}`, KUNCI_PEMBELI)).status, 404);
   assert.equal(tabel.size, 0); // PUT tidak membuat pesanan baru
 });
 
@@ -319,26 +295,26 @@ test('404 pesanan tidak ada (GET, PUT, DELETE)', async () => {
 
 test('500 bila DynamoDB gagal, tanpa membocorkan detail', async () => {
   errorBerikutnya = new Error('koneksi terputus');
-  const r = await panggil('GET', `/orders/${ID_TIDAK_ADA}`, KUNCI_PELANGGAN);
+  const r = await panggil('GET', `/orders/${ID_TIDAK_ADA}`, KUNCI_PEMBELI);
   assert.equal(r.status, 500);
   assert.doesNotMatch(r.data.error, /koneksi/);
 });
 
 test('kunci API tidak pernah tercetak di log', async () => {
   const id = await buatPesanan();
-  await panggil('GET', `/orders/${id}`, KUNCI_PENJUAL);
-  await panggil('PUT', `/orders/${id}`, KUNCI_PELANGGAN, { status: 'done' });
+  await panggil('GET', `/orders/${id}`, KUNCI_PEMBELI);
+  await panggil('PUT', `/orders/${id}`, KUNCI_PEMBELI, { status: 'done' });
   await panggil('GET', '/tidak-ada', 'kunci-salah-xyz');
   errorBerikutnya = new Error('gagal');
-  await panggil('DELETE', `/orders/${id}`, KUNCI_PENJUAL);
+  await panggil('DELETE', `/orders/${id}`, KUNCI_PEMBELI);
 
   assert.ok(log.length >= 5, 'setiap permintaan harus tercatat di log');
   const semua = log.join('\n');
-  for (const kunci of [KUNCI_PELANGGAN, KUNCI_PENJUAL, 'kunci-salah-xyz']) {
+  for (const kunci of [KUNCI_PEMBELI, 'kunci-salah-xyz']) {
     assert.ok(!semua.includes(kunci), `kunci "${kunci}" bocor ke log`);
   }
-  // Log tetap berguna: berisi method, path, role, dan status.
-  assert.match(semua, /"method":"PUT".*"role":"pelanggan".*"status":403/);
+  // Log tetap berguna: berisi method, path, dan status.
+  assert.match(semua, /"method":"PUT","path":"\/orders\/[0-9a-f-]+","status":200/);
 });
 
 // ---------- Kelola tabel (aws lambda invoke) ----------

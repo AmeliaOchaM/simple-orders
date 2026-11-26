@@ -11,7 +11,7 @@ if [[ ! -f .env ]]; then
 fi
 # shellcheck disable=SC1091
 source .env
-: "${API_URL:?API_URL kosong di .env}" "${KEY_PELANGGAN:?}" "${KEY_PENJUAL:?}"
+: "${API_URL:?API_URL kosong di .env}" "${KEY_PEMBELI:?KEY_PEMBELI kosong di .env}"
 
 mkdir -p out
 OUT="out/hasil-tes-$(date +%Y%m%d-%H%M%S).txt"
@@ -49,8 +49,8 @@ ID_PALSU='00000000-0000-4000-8000-000000000000'
 
 uji T1  "Tanpa kunci"                401 GET  "/orders/$ID_PALSU"
 uji T2  "Kunci salah"                401 GET  "/orders/$ID_PALSU" "kunci-salah"
-uji T3  "Route salah"                404 GET  "/tidak-ada" "$KEY_PELANGGAN"
-uji T4  "Pelanggan POST pesanan"     201 POST "/orders" "$KEY_PELANGGAN" "$PESANAN"
+uji T3  "Route salah"                404 GET  "/tidak-ada" "$KEY_PEMBELI"
+uji T4  "POST pesanan"               201 POST "/orders" "$KEY_PEMBELI" "$PESANAN"
 
 # Ambil orderId dari balasan T4 untuk tes berikutnya.
 ID="$(grep -o '"orderId":"[^"]*"' "$BODY" | cut -d'"' -f4)"
@@ -60,16 +60,12 @@ if [[ -z "$ID" ]]; then
 fi
 catat "     orderId: $ID"
 
-uji T5  "Pelanggan GET pesanan"      200 GET    "/orders/$ID" "$KEY_PELANGGAN"
-uji T6  "Penjual GET pesanan"        200 GET    "/orders/$ID" "$KEY_PENJUAL"
-uji T7  "Pelanggan PUT (dilarang)"   403 PUT    "/orders/$ID" "$KEY_PELANGGAN" '{"status":"done"}'
-uji T7b "Penjual POST (dilarang)"    403 POST   "/orders" "$KEY_PENJUAL" "$PESANAN"
-uji T8  "Penjual PUT status done"    200 PUT    "/orders/$ID" "$KEY_PENJUAL" '{"status":"done"}'
-uji T9  "POST quantity 0"            400 POST   "/orders" "$KEY_PELANGGAN" '{"customerName":"Budi","item":"Es teh","quantity":0}'
-uji T10 "PUT status salah"           400 PUT    "/orders/$ID" "$KEY_PENJUAL" '{"status":"selesai"}'
-uji T11 "Pelanggan DELETE (dilarang)" 403 DELETE "/orders/$ID" "$KEY_PELANGGAN"
-uji T12 "Penjual DELETE pesanan"     200 DELETE "/orders/$ID" "$KEY_PENJUAL"
-uji T13 "GET setelah dihapus"        404 GET    "/orders/$ID" "$KEY_PENJUAL"
+uji T5  "GET pesanan"                200 GET    "/orders/$ID" "$KEY_PEMBELI"
+uji T8  "PUT status done"            200 PUT    "/orders/$ID" "$KEY_PEMBELI" '{"status":"done"}'
+uji T9  "POST quantity 0"            400 POST   "/orders" "$KEY_PEMBELI" '{"customerName":"Budi","item":"Es teh","quantity":0}'
+uji T10 "PUT status salah"           400 PUT    "/orders/$ID" "$KEY_PEMBELI" '{"status":"selesai"}'
+uji T12 "DELETE pesanan"             200 DELETE "/orders/$ID" "$KEY_PEMBELI"
+uji T13 "GET setelah dihapus"        404 GET    "/orders/$ID" "$KEY_PEMBELI"
 
 catat ""
 catat "Total: $((LULUS + GAGAL)) tes, $LULUS OK, $GAGAL GAGAL"

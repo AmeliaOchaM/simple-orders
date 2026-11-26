@@ -24,7 +24,7 @@ Dokumen ini menjelaskan cara memasang, memverifikasi, dan membongkar Simple Orde
 | Tabel DynamoDB `orders` | `deploy.sh`, lewat invoke `{"action":"setupDatabase"}` | PK `orderId` (String), mode `PAY_PER_REQUEST`. **Tidak** dikelola CloudFormation. |
 | Log group `/aws/lambda/<nama-fungsi>` | Lambda (otomatis) | Log setiap permintaan. |
 
-Parameter template: `KeyPelanggan` dan `KeyPenjual` (`NoEcho`, minimal 16 karakter), yang menjadi env var `KEY_PELANGGAN` dan `KEY_PENJUAL`. Env var `TABLE_NAME` bernilai tetap `orders`.
+Parameter template: `KeyPembeli` (`NoEcho`, minimal 16 karakter), yang menjadi env var `KEY_PEMBELI`. Env var `TABLE_NAME` bernilai tetap `orders`.
 
 Output: `FunctionUrl` dan `FunctionName`.
 
@@ -54,11 +54,11 @@ aws lambda invoke --function-name <OrdersFn> --cli-binary-format raw-in-base64-o
    bash scripts/deploy.sh
    ```
    Yang dilakukan skrip:
-   - **a.** Membuat kunci acak bila belum ada di `.env`.
+   - **a.** Membuat kunci pembeli acak bila belum ada di `.env`.
    - **b.** Menjalankan `aws cloudformation deploy` (fungsi, URL, izin).
    - **c.** Membuat zip `src/` di `build/orders.zip`, menjalankan `aws lambda update-function-code`, lalu `aws lambda wait function-updated`.
    - **d.** Menjalankan `aws lambda invoke` dengan `{"action":"setupDatabase"}`: tabel dibuat, atau dipakai ulang bila sudah ada, lalu ditunggu sampai ACTIVE.
-   - **e.** Menyimpan `KEY_PELANGGAN`, `KEY_PENJUAL`, dan `API_URL` ke `.env`.
+   - **e.** Menyimpan `KEY_PEMBELI` dan `API_URL` ke `.env`.
 
    Skrip ini aman dijalankan berulang. Kunci lama dipakai lagi, kode diunggah ulang, dan tabel yang sudah ada tidak disentuh. Bila langkah d gagal, skrip berhenti dan menampilkan pesan error dari Lambda.
 5. Catat URL yang dicetak. Kunci API tersimpan di `.env` (`cat .env`).
@@ -68,20 +68,21 @@ aws lambda invoke --function-name <OrdersFn> --cli-binary-format raw-in-base64-o
 
 ## 4. Verifikasi
 
-1. **Tes API otomatis** (14 tes, harus `14 OK, 0 GAGAL`):
+1. **Tes API otomatis** (10 tes, harus `10 OK, 0 GAGAL`):
    ```bash
    bash scripts/test-api.sh
    ```
    Hasilnya tersimpan di `out/hasil-tes-<waktu>.txt`.
-2. **Halaman web.** Buka `API_URL` di browser.
-   - Role Pelanggan + `KEY_PELANGGAN`: buat pesanan, ID terisi otomatis, lalu tekan **Cek**.
-   - Role Penjual + `KEY_PENJUAL`: cari ID itu, tekan **Tandai selesai** (status menjadi Selesai), lalu **Hapus**.
+2. **Halaman web.** Buka `API_URL` di browser, lalu tempel `KEY_PEMBELI`.
+   - Buat pesanan. ID-nya otomatis terisi di form **Cek pesanan**.
+   - Tekan **Cek**. Tombol **Tandai diterima** dan **Batalkan** muncul di bawah hasil.
+   - Tekan **Tandai diterima** (status menjadi Diterima), lalu **Batalkan** (pesanan dihapus).
 3. **Status stack:**
    ```bash
    aws cloudformation describe-stacks --stack-name simple-orders \
      --query 'Stacks[0].[StackStatus,Outputs]'
    ```
-4. **Log CloudWatch.** Setiap permintaan tercatat sebagai satu baris `{"method","path","role","status"}`, tanpa kunci:
+4. **Log CloudWatch.** Setiap permintaan tercatat sebagai satu baris `{"method","path","status"}`, tanpa kunci:
    ```bash
    FN=$(aws cloudformation describe-stacks --stack-name simple-orders \
      --query "Stacks[0].Outputs[?OutputKey=='FunctionName'].OutputValue" --output text)
@@ -116,7 +117,7 @@ FN=$(aws cloudformation describe-stacks --stack-name simple-orders \
   --query "Stacks[0].Outputs[?OutputKey=='FunctionName'].OutputValue" --output text)
 
 # 1. Buat pesanan, catat ID-nya
-ID=$(curl -s -X POST "$API_URL/orders" -H "X-Api-Key: $KEY_PELANGGAN" \
+ID=$(curl -s -X POST "$API_URL/orders" -H "X-Api-Key: $KEY_PEMBELI" \
   -H 'Content-Type: application/json' \
   -d '{"customerName":"Uji","item":"Teh","quantity":1}' | grep -o '"orderId":"[^"]*"' | cut -d'"' -f4)
 echo "$ID"
@@ -125,7 +126,7 @@ echo "$ID"
 bash scripts/deploy.sh
 
 # 3. Pesanan masih ada (harap HTTP 200)
-curl -s -w '\n%{http_code}\n' "$API_URL/orders/$ID" -H "X-Api-Key: $KEY_PENJUAL"
+curl -s -w '\n%{http_code}\n' "$API_URL/orders/$ID" -H "X-Api-Key: $KEY_PEMBELI"
 ```
 
 ### B. `RETAIN=true` teardown + deploy ulang: data tetap ada
@@ -134,7 +135,7 @@ curl -s -w '\n%{http_code}\n' "$API_URL/orders/$ID" -H "X-Api-Key: $KEY_PENJUAL"
 source .env
 
 # 1. Buat pesanan, catat ID
-ID=$(curl -s -X POST "$API_URL/orders" -H "X-Api-Key: $KEY_PELANGGAN" \
+ID=$(curl -s -X POST "$API_URL/orders" -H "X-Api-Key: $KEY_PEMBELI" \
   -H 'Content-Type: application/json' \
   -d '{"customerName":"Persisten","item":"Kopi","quantity":1}' | grep -o '"orderId":"[^"]*"' | cut -d'"' -f4)
 echo "$ID"
@@ -148,7 +149,7 @@ bash scripts/deploy.sh
 source .env   # API_URL baru (Function URL dibuat ulang), kunci tetap sama
 
 # 4. Pesanan lama masih ada (harap HTTP 200)
-curl -s -w '\n%{http_code}\n' "$API_URL/orders/$ID" -H "X-Api-Key: $KEY_PENJUAL"
+curl -s -w '\n%{http_code}\n' "$API_URL/orders/$ID" -H "X-Api-Key: $KEY_PEMBELI"
 ```
 
 Langkah 2 memanggil `describe-table` dengan kredensial user. Bila ditolak oleh sandbox, lewati saja. Langkah 4 tetap membuktikan data selamat.
@@ -163,7 +164,7 @@ Bila teardown dijalankan **tanpa** `RETAIN=true`, `teardown.sh` lebih dulu meman
 - **Tabel di luar CloudFormation.** Menghapus stack tidak menghapus tabel. Tabel dihapus oleh `teardown.sh` (action `deleteDatabase`), kecuali `RETAIN=true`. Bila stack dihapus manual lewat konsol, tabel `orders` tertinggal dan harus dihapus manual.
 - **Kode di luar CloudFormation.** Template hanya berisi kode placeholder. Kalau stack di-deploy tanpa `deploy.sh`, URL membalas 503 "Kode belum diunggah".
 - **Function URL publik butuh dua izin**: `lambda:InvokeFunctionUrl` dan `lambda:InvokeFunction` (`InvokedViaFunctionUrl`).
-- **Kunci API dibagikan per role**, bukan per pengguna. Tidak ada login, dan siapa pun yang tahu kunci bisa memakai role itu.
+- **Satu kunci API untuk semua pembeli.** Tidak ada login dan tidak ada role. Siapa pun yang tahu kunci bisa membuat, mengubah, dan membatalkan pesanan apa pun, asal tahu ID-nya.
 - **Kredensial sandbox berlaku per sesi.** Bila sesi habis, buka ulang CloudShell dari sesi baru. Resource biasanya tetap ada antarsesi, tapi hilang bila sandbox di-reset. Karena itu, salin `.env` ke tempat aman.
 - **Nama tabel `orders` tetap.** Bila tabel `orders` sudah ada sebelumnya, tabel itu dipakai.
 - **Tidak ada daftar semua pesanan** (`GET /orders`), sesuai spesifikasi. Pesanan dicari dengan ID.
@@ -172,13 +173,13 @@ Bila teardown dijalankan **tanpa** `RETAIN=true`, `teardown.sh` lebih dulu meman
 
 - [ ] Output `bash scripts/deploy.sh` sampai baris "Selesai", termasuk hasil `setupDatabase` (jangan tampilkan isi `.env`)
 - [ ] CloudFormation: stack `simple-orders` berstatus `CREATE_COMPLETE` / `UPDATE_COMPLETE`, tab **Resources** (4 resource)
-- [ ] CloudFormation tab **Parameters**: `KeyPelanggan` dan `KeyPenjual` tampil sebagai `****`
+- [ ] CloudFormation tab **Parameters**: `KeyPembeli` tampil sebagai `****`
 - [ ] Lambda `OrdersFn`: tab **Code** (kode asli, bukan placeholder) dan **Configuration > Function URL** (Auth type NONE)
 - [ ] DynamoDB: tabel `orders` (ACTIVE) dan **Explore items** berisi pesanan
-- [ ] Halaman web: pelanggan berhasil membuat pesanan (ID tampil)
-- [ ] Halaman web: penjual mencari pesanan, status Selesai setelah "Tandai selesai"
+- [ ] Halaman web: pembeli berhasil membuat pesanan (ID tampil)
+- [ ] Halaman web: cek pesanan, status Diterima setelah "Tandai diterima"
 - [ ] Halaman web: pesan error, misalnya `Error 401` dengan kunci salah
-- [ ] Output `bash scripts/test-api.sh`: `Total: 14 tes, 14 OK, 0 GAGAL`
+- [ ] Output `bash scripts/test-api.sh`: `Total: 10 tes, 10 OK, 0 GAGAL`
 - [ ] CloudWatch Logs `OrdersFn`: baris log JSON tanpa kunci API
 - [ ] Skenario A: HTTP 200 setelah deploy ulang (restart Lambda)
 - [ ] Skenario B: output `RETAIN=true bash scripts/teardown.sh`, lalu HTTP 200 setelah deploy ulang

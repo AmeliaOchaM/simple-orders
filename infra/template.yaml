@@ -7,16 +7,11 @@ Description: >
   dibuat lewat "aws lambda invoke" dengan action setupDatabase.
 
 Parameters:
-  KeyPelanggan:
+  KeyPembeli:
     Type: String
     NoEcho: true
     MinLength: 16
-    Description: Kunci API untuk role pelanggan (rahasia).
-  KeyPenjual:
-    Type: String
-    NoEcho: true
-    MinLength: 16
-    Description: Kunci API untuk role penjual (rahasia).
+    Description: Kunci API untuk pembeli (rahasia).
 
 Resources:
   # ---------------------------------------------------------------------------
@@ -44,8 +39,7 @@ Resources:
       Environment:
         Variables:
           TABLE_NAME: orders
-          KEY_PELANGGAN: !Ref KeyPelanggan
-          KEY_PENJUAL: !Ref KeyPenjual
+          KEY_PEMBELI: !Ref KeyPembeli
 
   # Function URL publik (tanpa IAM auth). Keamanan ditangani oleh X-Api-Key.
   OrdersFnUrl:

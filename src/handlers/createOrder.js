@@ -1,4 +1,4 @@
-// POST /orders - pelanggan membuat pesanan baru.
+// POST /orders - pembeli membuat pesanan baru.
 const { randomUUID } = require('node:crypto');
 const { db, TABLE_NAME, PutCommand } = require('../utils/dynamodb');
 const { bacaJson, validasiBuat, bersihkan } = require('../utils/validate');

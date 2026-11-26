@@ -12,13 +12,12 @@ cd "$(dirname "$0")/.."
 STACK="${STACK:-simple-orders}"
 export AWS_DEFAULT_REGION="${AWS_REGION:-us-east-1}"
 
-# a. Kunci API: pakai yang lama dari .env bila ada, kalau tidak buat acak.
+# a. Kunci API pembeli: pakai yang lama dari .env bila ada, kalau tidak buat acak.
 if [[ -f .env ]]; then
   # shellcheck disable=SC1091
   source .env
 fi
-KEY_PELANGGAN="${KEY_PELANGGAN:-$(openssl rand -hex 24)}"
-KEY_PENJUAL="${KEY_PENJUAL:-$(openssl rand -hex 24)}"
+KEY_PEMBELI="${KEY_PEMBELI:-$(openssl rand -hex 24)}"
 
 # Stack yang gagal saat pertama dibuat (ROLLBACK_COMPLETE) tidak bisa di-update; hapus dulu.
 STATUS="$(aws cloudformation describe-stacks --stack-name "$STACK" \
@@ -37,8 +36,7 @@ aws cloudformation deploy \
   --template-file infra/template.yaml \
   --no-fail-on-empty-changeset \
   --parameter-overrides \
-    KeyPelanggan="$KEY_PELANGGAN" \
-    KeyPenjual="$KEY_PENJUAL"
+    KeyPembeli="$KEY_PEMBELI"
 
 output() {
   aws cloudformation describe-stacks --stack-name "$STACK" \
@@ -75,8 +73,7 @@ echo "    $(cat build/setup-hasil.json)"
 # e. Simpan kunci dan URL ke .env (hanya bisa dibaca pemilik, tidak di-commit).
 umask 077
 cat > .env <<EOF
-KEY_PELANGGAN=$KEY_PELANGGAN
-KEY_PENJUAL=$KEY_PENJUAL
+KEY_PEMBELI=$KEY_PEMBELI
 API_URL=$API_URL
 EOF
 

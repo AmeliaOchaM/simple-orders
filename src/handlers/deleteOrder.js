@@ -1,4 +1,4 @@
-// DELETE /orders/{id} - penjual menghapus pesanan.
+// DELETE /orders/{id} - pembeli membatalkan (menghapus) pesanan.
 const { db, TABLE_NAME, DeleteCommand } = require('../utils/dynamodb');
 const { validasiId } = require('../utils/validate');
 const { json, gagal } = require('../utils/response');

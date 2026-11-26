@@ -4,16 +4,16 @@
 // - {"action": ...} via invoke  -> kelola tabel (handlers/setupDatabase.js)
 const fs = require('node:fs');
 const path = require('node:path');
-const { cariRole, bolehAkses } = require('./utils/auth');
+const { kunciBenar } = require('./utils/auth');
 const { gagal, teks } = require('./utils/response');
 const setupDatabase = require('./handlers/setupDatabase');
 
-// Daftar rute API. "nama" harus sama dengan kunci di MATRIKS (utils/auth.js).
+// Daftar rute API.
 const RUTE = [
-  { method: 'POST', pola: /^\/orders$/, nama: 'POST /orders', fn: require('./handlers/createOrder') },
-  { method: 'GET', pola: /^\/orders\/([^/]+)$/, nama: 'GET /orders/{id}', fn: require('./handlers/getOrder') },
-  { method: 'PUT', pola: /^\/orders\/([^/]+)$/, nama: 'PUT /orders/{id}', fn: require('./handlers/updateOrder') },
-  { method: 'DELETE', pola: /^\/orders\/([^/]+)$/, nama: 'DELETE /orders/{id}', fn: require('./handlers/deleteOrder') },
+  { method: 'POST', pola: /^\/orders$/, fn: require('./handlers/createOrder') },
+  { method: 'GET', pola: /^\/orders\/([^/]+)$/, fn: require('./handlers/getOrder') },
+  { method: 'PUT', pola: /^\/orders\/([^/]+)$/, fn: require('./handlers/updateOrder') },
+  { method: 'DELETE', pola: /^\/orders\/([^/]+)$/, fn: require('./handlers/deleteOrder') },
 ];
 
 // File web dibaca sekali saat cold start, lalu disimpan di memori.
@@ -26,8 +26,8 @@ for (const [url, file, tipe] of [
   WEB[url] = { tipe: `${tipe}; charset=utf-8`, isi: fs.readFileSync(path.join(__dirname, 'web', file), 'utf8') };
 }
 
-// Urutan cek: 401 kunci salah -> 404 rute tidak ada -> 403 role tidak boleh
-// -> 400 input salah -> 404 pesanan tidak ada (dua terakhir di dalam handlers/).
+// Urutan cek: 401 kunci salah -> 404 rute tidak ada -> 400 input salah
+// -> 404 pesanan tidak ada (dua terakhir di dalam handlers/).
 async function proses(event, log) {
   const method = event.requestContext?.http?.method || 'GET';
   const p = (event.rawPath || '/').replace(/\/+$/, '') || '/';
@@ -36,14 +36,10 @@ async function proses(event, log) {
 
   if (method === 'GET' && WEB[p]) return teks(200, WEB[p].tipe, WEB[p].isi);
 
-  const role = cariRole(event.headers);
-  if (!role) return gagal(401, 'Kunci API salah atau tidak ada');
-  log.role = role;
+  if (!kunciBenar(event.headers)) return gagal(401, 'Kunci API salah atau tidak ada');
 
   const rute = RUTE.find((r) => r.method === method && r.pola.test(p));
   if (!rute) return gagal(404, 'Rute tidak ditemukan');
-
-  if (!bolehAkses(role, rute.nama)) return gagal(403, `Role ${role} tidak boleh mengakses ${rute.nama}`);
 
   const id = p.match(rute.pola)[1]; // undefined untuk POST /orders
   return rute.fn(event, id);
@@ -55,7 +51,7 @@ exports.handler = async (event) => {
   // sehingga jalur ini tidak bisa dipicu dari internet.
   if (event && event.action && !event.requestContext) return setupDatabase.handler(event);
 
-  const log = { method: '-', path: '-', role: '-' };
+  const log = { method: '-', path: '-' };
   let res;
   try {
     res = await proses(event, log);

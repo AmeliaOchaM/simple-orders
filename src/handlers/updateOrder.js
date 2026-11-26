@@ -1,4 +1,4 @@
-// PUT /orders/{id} - penjual mengubah status atau isi pesanan (boleh sebagian field).
+// PUT /orders/{id} - pembeli mengubah status atau isi pesanan (boleh sebagian field).
 const { db, TABLE_NAME, UpdateCommand } = require('../utils/dynamodb');
 const { validasiId, validasiUbah, bacaJson, bersihkan } = require('../utils/validate');
 const { json, gagal } = require('../utils/response');

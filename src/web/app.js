@@ -2,7 +2,6 @@
 // Data dari API selalu ditulis dengan textContent (bukan innerHTML) supaya aman dari XSS.
 
 const $ = (id) => document.getElementById(id);
-let idAktif = null; // ID pesanan yang sedang dibuka penjual
 
 const LABEL = {
   orderId: 'ID',
@@ -40,7 +39,7 @@ function tampilPesanan(judul, p) {
     } else if (kunci === 'status') {
       const span = document.createElement('span');
       span.className = `label-status ${p.status}`;
-      span.textContent = p.status === 'done' ? 'Selesai' : 'Menunggu';
+      span.textContent = p.status === 'done' ? 'Diterima' : 'Menunggu';
       dd.append(span);
     } else if (kunci === 'createdAt') {
       dd.textContent = new Date(p.createdAt).toLocaleString('id-ID');
@@ -87,26 +86,24 @@ async function sibuk(tombol, method, path, body) {
   }
 }
 
-// ---------- Role ----------
+// ---------- Tombol aksi (di bawah hasil cek) ----------
 
-function aturAksiPenjual(pesanan) {
-  idAktif = pesanan ? pesanan.orderId : null;
-  $('aksi-penjual').hidden = !pesanan;
+// Tampilkan tombol aksi untuk pesanan hasil cek, atau sembunyikan (pesanan = null).
+function aturAksi(pesanan) {
+  $('aksi-pesanan').hidden = !pesanan;
   $('btn-selesai').disabled = !pesanan || pesanan.status === 'done';
 }
 
-$('role').addEventListener('change', () => {
-  const penjual = $('role').value === 'penjual';
-  $('panel-pelanggan').hidden = penjual;
-  $('panel-penjual').hidden = !penjual;
-  aturAksiPenjual(null);
-  tampilPesan('Belum ada permintaan.');
-});
+// ID diambil dari form cek. Bila ID diubah, tombol disembunyikan sampai "Cek" lagi,
+// supaya aksi tidak mengenai pesanan lain dari yang sedang tampil.
+const idCek = () => encodeURIComponent($('cek-id').value.trim());
+$('cek-id').addEventListener('input', () => aturAksi(null));
 
-// ---------- Pelanggan ----------
+// ---------- Buat & cek pesanan ----------
 
 $('form-buat').addEventListener('submit', async (e) => {
   e.preventDefault();
+  aturAksi(null);
   const data = await sibuk(e.submitter, 'POST', '/orders', {
     customerName: $('buat-nama').value,
     item: $('buat-menu').value,
@@ -120,35 +117,25 @@ $('form-buat').addEventListener('submit', async (e) => {
 
 $('form-cek').addEventListener('submit', async (e) => {
   e.preventDefault();
-  const id = encodeURIComponent($('cek-id').value.trim());
-  const data = await sibuk(e.submitter, 'GET', `/orders/${id}`);
-  if (data) tampilPesanan('Detail pesanan', data);
-});
-
-// ---------- Penjual ----------
-
-$('form-cari').addEventListener('submit', async (e) => {
-  e.preventDefault();
-  aturAksiPenjual(null);
-  const id = encodeURIComponent($('cari-id').value.trim());
-  const data = await sibuk(e.submitter, 'GET', `/orders/${id}`);
+  aturAksi(null);
+  const data = await sibuk(e.submitter, 'GET', `/orders/${idCek()}`);
   if (!data) return;
   tampilPesanan('Detail pesanan', data);
-  aturAksiPenjual(data);
+  aturAksi(data);
 });
 
 $('btn-selesai').addEventListener('click', async () => {
-  const data = await sibuk($('btn-selesai'), 'PUT', `/orders/${idAktif}`, { status: 'done' });
+  const data = await sibuk($('btn-selesai'), 'PUT', `/orders/${idCek()}`, { status: 'done' });
   if (!data) return;
-  tampilPesanan('Pesanan ditandai selesai', data);
-  aturAksiPenjual(data); // tombol "Tandai selesai" jadi nonaktif
+  tampilPesanan('Pesanan ditandai diterima', data);
+  aturAksi(data); // tombol "Tandai diterima" jadi nonaktif
 });
 
 $('btn-hapus').addEventListener('click', async () => {
-  if (!confirm('Hapus pesanan ini?')) return;
-  const id = idAktif;
-  const data = await sibuk($('btn-hapus'), 'DELETE', `/orders/${id}`);
+  if (!confirm('Batalkan pesanan ini? Pesanan akan dihapus.')) return;
+  const id = $('cek-id').value.trim();
+  const data = await sibuk($('btn-hapus'), 'DELETE', `/orders/${idCek()}`);
   if (!data) return;
-  tampilPesan(`Pesanan ${id} dihapus.`, 'sukses');
-  aturAksiPenjual(null);
+  tampilPesan(`Pesanan ${id} dibatalkan.`, 'sukses');
+  aturAksi(null);
 });
