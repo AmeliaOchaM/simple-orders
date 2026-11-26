@@ -2,20 +2,11 @@ AWSTemplateFormatVersion: "2010-09-09"
 Description: >
   Simple Orders - pencatatan pesanan kantin.
   Browser -> Lambda Function URL -> OrdersFn -> DynamoDB "orders".
-  Tabel dibuat oleh Lambda TableCreator (Custom Resource), karena user sandbox
-  tidak boleh CreateTable langsung.
+  Stack ini hanya membuat fungsi dengan kode placeholder. Kode asli (folder src/)
+  diunggah scripts/deploy.sh lewat "aws lambda update-function-code", dan tabel
+  dibuat lewat "aws lambda invoke" dengan action setupDatabase.
 
 Parameters:
-  TableName:
-    Type: String
-    Default: orders
-    Description: Nama tabel DynamoDB untuk menyimpan pesanan.
-  CodeBucket:
-    Type: String
-    Description: Bucket S3 tempat zip kode (folder src/) diunggah.
-  CodeKey:
-    Type: String
-    Description: Nama objek (key) zip kode di bucket S3. Dipakai kedua Lambda.
   KeyPelanggan:
     Type: String
     NoEcho: true
@@ -26,47 +17,12 @@ Parameters:
     NoEcho: true
     MinLength: 16
     Description: Kunci API untuk role penjual (rahasia).
-  RetainTableOnDelete:
-    Type: String
-    Default: "false"
-    AllowedValues: ["true", "false"]
-    Description: >
-      "true" = tabel (beserta datanya) TIDAK ikut terhapus saat stack dihapus,
-      dan dipakai ulang saat stack dibuat lagi.
 
 Resources:
   # ---------------------------------------------------------------------------
-  # Lambda kecil yang membuat (dan menghapus) tabel DynamoDB.
+  # Lambda utama: API pesanan, halaman web, dan pengelola tabel (action).
   # Memakai role bawaan LabRole karena kita tidak bisa membuat IAM role.
-  # Kode dari zip yang sama dengan OrdersFn: src/handlers/setupDatabase.js
-  # ---------------------------------------------------------------------------
-  TableCreatorFn:
-    Type: AWS::Lambda::Function
-    Properties:
-      Description: Membuat tabel DynamoDB untuk Simple Orders (Custom Resource).
-      Runtime: nodejs22.x
-      Handler: handlers/setupDatabase.handler
-      Role: !Sub arn:aws:iam::${AWS::AccountId}:role/LabRole
-      Timeout: 120
-      MemorySize: 128
-      Code:
-        S3Bucket: !Ref CodeBucket
-        S3Key: !Ref CodeKey
-
-  # ---------------------------------------------------------------------------
-  # Custom Resource: meminta TableCreatorFn membuat tabel.
-  # !Ref OrdersTable menghasilkan nama tabel (PhysicalResourceId).
-  # ---------------------------------------------------------------------------
-  OrdersTable:
-    Type: Custom::DynamoDBTable
-    Properties:
-      ServiceToken: !GetAtt TableCreatorFn.Arn
-      TableName: !Ref TableName
-      RetainOnDelete: !Ref RetainTableOnDelete
-
-  # ---------------------------------------------------------------------------
-  # Lambda utama: API pesanan + halaman web. Log otomatis ke CloudWatch.
-  # Kode: src/index.js (zip yang sama dengan TableCreatorFn).
+  # Log otomatis ke CloudWatch.
   # ---------------------------------------------------------------------------
   OrdersFn:
     Type: AWS::Lambda::Function
@@ -75,14 +31,19 @@ Resources:
       Runtime: nodejs22.x
       Handler: index.handler
       Role: !Sub arn:aws:iam::${AWS::AccountId}:role/LabRole
-      Timeout: 10
+      Timeout: 60 # cukup untuk menunggu tabel ACTIVE saat action setupDatabase
       MemorySize: 256
       Code:
-        S3Bucket: !Ref CodeBucket
-        S3Key: !Ref CodeKey
+        ZipFile: |
+          // Placeholder. Kode asli (folder src/) diunggah oleh scripts/deploy.sh.
+          exports.handler = async () => ({
+            statusCode: 503,
+            headers: { 'content-type': 'application/json' },
+            body: JSON.stringify({ error: 'Kode belum diunggah. Jalankan scripts/deploy.sh' }),
+          });
       Environment:
         Variables:
-          TABLE_NAME: !Ref OrdersTable
+          TABLE_NAME: orders
           KEY_PELANGGAN: !Ref KeyPelanggan
           KEY_PENJUAL: !Ref KeyPenjual
 
@@ -103,6 +64,7 @@ Resources:
       FunctionUrlAuthType: NONE
 
   # Izin 2/2: pemanggilan fungsi, tapi hanya bila lewat Function URL.
+  # (Invoke langsung untuk action setupDatabase tetap butuh kredensial AWS.)
   OrdersFnInvokePermission:
     Type: AWS::Lambda::Permission
     Properties:
@@ -115,9 +77,6 @@ Outputs:
   FunctionUrl:
     Description: URL aplikasi (halaman web + API).
     Value: !GetAtt OrdersFnUrl.FunctionUrl
-  TableName:
-    Description: Nama tabel DynamoDB pesanan.
-    Value: !Ref OrdersTable
-  TableArn:
-    Description: ARN tabel DynamoDB pesanan.
-    Value: !Sub arn:aws:dynamodb:${AWS::Region}:${AWS::AccountId}:table/${OrdersTable}
+  FunctionName:
+    Description: Nama fungsi Lambda (untuk update-function-code dan invoke).
+    Value: !Ref OrdersFn

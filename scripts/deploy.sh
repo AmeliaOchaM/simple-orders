@@ -1,26 +1,18 @@
 #!/usr/bin/env bash
-# Deploy Simple Orders dari AWS CloudShell.
+# Deploy Simple Orders dari AWS CloudShell (tanpa S3).
 #
-# Pakai:
-#   bash scripts/deploy.sh               # deploy biasa
-#   RETAIN=true bash scripts/deploy.sh   # tabel TIDAK ikut terhapus saat stack dihapus
+# Pakai: bash scripts/deploy.sh
 #
-# Langkah: buat bucket kode -> zip src/ -> unggah -> cloudformation deploy -> simpan .env
-# Kunci API dibuat acak sekali, lalu dipakai ulang dari .env. Kunci tidak dicetak ke layar.
+# Langkah: kunci -> cloudformation deploy -> zip src/ -> update-function-code
+#          -> invoke setupDatabase (buat tabel) -> simpan .env
+# Aman dijalankan berulang. Kunci API tidak dicetak ke layar.
 set -euo pipefail
 cd "$(dirname "$0")/.."
 
 STACK="${STACK:-simple-orders}"
-REGION="${AWS_REGION:-us-east-1}"
-RETAIN="${RETAIN:-false}"
-export AWS_DEFAULT_REGION="$REGION"
+export AWS_DEFAULT_REGION="${AWS_REGION:-us-east-1}"
 
-if [[ "$RETAIN" != "true" && "$RETAIN" != "false" ]]; then
-  echo "RETAIN harus true atau false" >&2
-  exit 1
-fi
-
-# 1. Kunci API: pakai yang lama dari .env bila ada, kalau tidak buat acak.
+# a. Kunci API: pakai yang lama dari .env bila ada, kalau tidak buat acak.
 if [[ -f .env ]]; then
   # shellcheck disable=SC1091
   source .env
@@ -28,30 +20,7 @@ fi
 KEY_PELANGGAN="${KEY_PELANGGAN:-$(openssl rand -hex 24)}"
 KEY_PENJUAL="${KEY_PENJUAL:-$(openssl rand -hex 24)}"
 
-# 2. Bucket S3 untuk kode (nama unik per akun).
-AKUN="$(aws sts get-caller-identity --query Account --output text)"
-BUCKET="simple-orders-code-${AKUN}"
-if ! aws s3api head-bucket --bucket "$BUCKET" 2>/dev/null; then
-  echo "==> Membuat bucket $BUCKET"
-  if [[ "$REGION" == "us-east-1" ]]; then
-    aws s3api create-bucket --bucket "$BUCKET" >/dev/null
-  else
-    aws s3api create-bucket --bucket "$BUCKET" \
-      --create-bucket-configuration LocationConstraint="$REGION" >/dev/null
-  fi
-fi
-
-# 3. Zip isi folder src/. Nama zip memakai hash isi kode: kalau kode berubah,
-#    nama berubah, sehingga CloudFormation tahu Lambda harus diperbarui.
-HASH="$(cd src && find . -type f | LC_ALL=C sort | xargs sha256sum | sha256sum | cut -c1-12)"
-ZIP="orders-${HASH}.zip"
-mkdir -p build
-rm -f "build/$ZIP"
-(cd src && zip -qr "../build/$ZIP" .)
-echo "==> Mengunggah build/$ZIP ke s3://$BUCKET/"
-aws s3 cp "build/$ZIP" "s3://$BUCKET/$ZIP" --only-show-errors
-
-# 4. Stack yang gagal saat pertama dibuat (ROLLBACK_COMPLETE) tidak bisa di-update; hapus dulu.
+# Stack yang gagal saat pertama dibuat (ROLLBACK_COMPLETE) tidak bisa di-update; hapus dulu.
 STATUS="$(aws cloudformation describe-stacks --stack-name "$STACK" \
   --query 'Stacks[0].StackStatus' --output text 2>/dev/null || echo TIDAK_ADA)"
 if [[ "$STATUS" == "ROLLBACK_COMPLETE" ]]; then
@@ -60,24 +29,50 @@ if [[ "$STATUS" == "ROLLBACK_COMPLETE" ]]; then
   aws cloudformation wait stack-delete-complete --stack-name "$STACK"
 fi
 
-# 5. Deploy. Kunci dikirim sebagai parameter NoEcho (tidak tampil di konsol CloudFormation).
-echo "==> Deploy stack $STACK (RETAIN=$RETAIN)"
+# b. Stack: fungsi (kode placeholder), Function URL, dan izin.
+#    Kunci dikirim sebagai parameter NoEcho (tidak tampil di konsol CloudFormation).
+echo "==> Deploy stack $STACK"
 aws cloudformation deploy \
   --stack-name "$STACK" \
   --template-file infra/template.yaml \
   --no-fail-on-empty-changeset \
   --parameter-overrides \
-    CodeBucket="$BUCKET" \
-    CodeKey="$ZIP" \
     KeyPelanggan="$KEY_PELANGGAN" \
-    KeyPenjual="$KEY_PENJUAL" \
-    RetainTableOnDelete="$RETAIN"
+    KeyPenjual="$KEY_PENJUAL"
 
-# 6. Ambil URL dan simpan semuanya ke .env (hanya bisa dibaca pemilik, tidak di-commit).
-URL="$(aws cloudformation describe-stacks --stack-name "$STACK" \
-  --query "Stacks[0].Outputs[?OutputKey=='FunctionUrl'].OutputValue" --output text)"
+output() {
+  aws cloudformation describe-stacks --stack-name "$STACK" \
+    --query "Stacks[0].Outputs[?OutputKey=='$1'].OutputValue" --output text
+}
+FN="$(output FunctionName)"
+URL="$(output FunctionUrl)"
 API_URL="${URL%/}"
 
+# c. Zip isi folder src/ lalu unggah langsung ke Lambda.
+echo "==> Mengunggah kode ke $FN"
+mkdir -p build
+rm -f build/orders.zip
+(cd src && zip -qr ../build/orders.zip .)
+aws lambda wait function-updated --function-name "$FN" # tunggu bila masih diperbarui CloudFormation
+aws lambda update-function-code --function-name "$FN" \
+  --zip-file fileb://build/orders.zip >/dev/null
+aws lambda wait function-updated --function-name "$FN"
+
+# d. Buat tabel (atau pakai ulang bila sudah ada).
+echo "==> Menyiapkan tabel DynamoDB"
+aws lambda invoke --function-name "$FN" \
+  --cli-binary-format raw-in-base64-out \
+  --payload '{"action":"setupDatabase"}' \
+  build/setup-hasil.json >/dev/null
+if ! grep -q '"ok":true' build/setup-hasil.json; then
+  echo "Gagal menyiapkan tabel:" >&2
+  cat build/setup-hasil.json >&2
+  echo >&2
+  exit 1
+fi
+echo "    $(cat build/setup-hasil.json)"
+
+# e. Simpan kunci dan URL ke .env (hanya bisa dibaca pemilik, tidak di-commit).
 umask 077
 cat > .env <<EOF
 KEY_PELANGGAN=$KEY_PELANGGAN

@@ -1,42 +1,49 @@
 #!/usr/bin/env bash
-# Hapus semua resource Simple Orders dari AWS CloudShell.
-# - Stack CloudFormation dihapus (Lambda, Function URL, izin).
-# - Tabel ikut terhapus, KECUALI deploy terakhir memakai RETAIN=true.
-# - Bucket kode dikosongkan lalu dihapus.
+# Hapus Simple Orders dari AWS CloudShell.
+#
+# Pakai:
+#   bash scripts/teardown.sh               # hapus tabel (beserta data) + stack
+#   RETAIN=true bash scripts/teardown.sh   # SIMPAN tabel, hapus stack saja
+#
 # File .env (kunci) tetap disimpan supaya deploy ulang memakai kunci yang sama.
 set -euo pipefail
 cd "$(dirname "$0")/.."
 
 STACK="${STACK:-simple-orders}"
+RETAIN="${RETAIN:-false}"
 export AWS_DEFAULT_REGION="${AWS_REGION:-us-east-1}"
 
-AKUN="$(aws sts get-caller-identity --query Account --output text)"
-BUCKET="simple-orders-code-${AKUN}"
+if ! aws cloudformation describe-stacks --stack-name "$STACK" >/dev/null 2>&1; then
+  echo "Stack $STACK tidak ada, tidak ada yang dihapus."
+  exit 0
+fi
 
-# 1. Hapus stack dulu (Lambda, Function URL, izin, dan tabel bila tidak RETAIN).
-if aws cloudformation describe-stacks --stack-name "$STACK" >/dev/null 2>&1; then
-  RETAIN="$(aws cloudformation describe-stacks --stack-name "$STACK" \
-    --query "Stacks[0].Parameters[?ParameterKey=='RetainTableOnDelete'].ParameterValue" --output text)"
-  echo "==> Menghapus stack $STACK (RetainTableOnDelete=$RETAIN)"
-  aws cloudformation delete-stack --stack-name "$STACK"
-  aws cloudformation wait stack-delete-complete --stack-name "$STACK"
-  if [[ "$RETAIN" == "true" ]]; then
-    echo "    Tabel DynamoDB DISIMPAN. Deploy ulang akan memakai data yang sama."
-  else
-    echo "    Tabel DynamoDB ikut terhapus."
+FN="$(aws cloudformation describe-stacks --stack-name "$STACK" \
+  --query "Stacks[0].Outputs[?OutputKey=='FunctionName'].OutputValue" --output text)"
+
+# 1. Hapus tabel lewat fungsi (selama fungsi masih ada), kecuali RETAIN=true.
+if [[ "$RETAIN" == "true" ]]; then
+  echo "==> RETAIN=true: tabel DynamoDB DISIMPAN (deploy ulang akan memakai data yang sama)"
+else
+  echo "==> Menghapus tabel DynamoDB"
+  mkdir -p build
+  aws lambda invoke --function-name "$FN" \
+    --cli-binary-format raw-in-base64-out \
+    --payload '{"action":"deleteDatabase"}' \
+    build/teardown-hasil.json >/dev/null
+  if ! grep -q '"ok":true' build/teardown-hasil.json; then
+    echo "Gagal menghapus tabel, stack TIDAK dihapus:" >&2
+    cat build/teardown-hasil.json >&2
+    echo >&2
+    exit 1
   fi
-else
-  echo "==> Stack $STACK tidak ada, dilewati"
+  echo "    $(cat build/teardown-hasil.json)"
 fi
 
-# 2. Kosongkan dan hapus bucket kode.
-if aws s3api head-bucket --bucket "$BUCKET" 2>/dev/null; then
-  echo "==> Mengosongkan dan menghapus bucket $BUCKET"
-  aws s3 rm "s3://$BUCKET" --recursive --only-show-errors
-  aws s3api delete-bucket --bucket "$BUCKET"
-else
-  echo "==> Bucket $BUCKET tidak ada, dilewati"
-fi
+# 2. Hapus stack (Lambda, Function URL, izin).
+echo "==> Menghapus stack $STACK"
+aws cloudformation delete-stack --stack-name "$STACK"
+aws cloudformation wait stack-delete-complete --stack-name "$STACK"
 
 rm -rf build
 echo "Selesai. File .env tetap disimpan (hapus manual bila tidak diperlukan)."

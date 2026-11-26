@@ -1,10 +1,12 @@
 // Handler utama OrdersFn (handler: index.handler).
 // - GET /, /style.css, /app.js -> file halaman web (publik, tanpa kunci)
 // - /orders...                  -> API, diteruskan ke handlers/
+// - {"action": ...} via invoke  -> kelola tabel (handlers/setupDatabase.js)
 const fs = require('node:fs');
 const path = require('node:path');
 const { cariRole, bolehAkses } = require('./utils/auth');
 const { gagal, teks } = require('./utils/response');
+const setupDatabase = require('./handlers/setupDatabase');
 
 // Daftar rute API. "nama" harus sama dengan kunci di MATRIKS (utils/auth.js).
 const RUTE = [
@@ -48,6 +50,11 @@ async function proses(event, log) {
 }
 
 exports.handler = async (event) => {
+  // Dipanggil langsung lewat "aws lambda invoke" (tanpa requestContext, jadi bukan
+  // lewat Function URL): kelola tabel. Permintaan dari URL selalu punya requestContext,
+  // sehingga jalur ini tidak bisa dipicu dari internet.
+  if (event && event.action && !event.requestContext) return setupDatabase.handler(event);
+
   const log = { method: '-', path: '-', role: '-' };
   let res;
   try {

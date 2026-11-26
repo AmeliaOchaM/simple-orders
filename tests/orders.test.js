@@ -62,9 +62,39 @@ const db = {
   },
 };
 
+// Perintah tabel (dipakai handlers/setupDatabase.js). Status tabel disimpan di sini.
+let tabelAda = false;
+const perintahTabel = []; // catatan perintah tabel yang dijalankan
+class CreateTableCommand extends Perintah {}
+class DeleteTableCommand extends Perintah {}
+
+const client = {
+  async send(cmd) {
+    perintahTabel.push(cmd.constructor.name);
+    if (cmd instanceof CreateTableCommand) {
+      if (tabelAda) throw Object.assign(new Error('Table already exists'), { name: 'ResourceInUseException' });
+      tabelAda = true;
+    } else if (cmd instanceof DeleteTableCommand) {
+      if (!tabelAda) throw Object.assign(new Error('Table not found'), { name: 'ResourceNotFoundException' });
+      tabelAda = false;
+    }
+    return {};
+  },
+};
+async function waitUntilTableExists() {
+  perintahTabel.push('waitUntilTableExists');
+}
+async function waitUntilTableNotExists() {
+  perintahTabel.push('waitUntilTableNotExists');
+}
+
 const ROOT = path.join(__dirname, '..');
 require.cache[path.join(ROOT, 'src/utils/dynamodb.js')] = {
-  exports: { db, TABLE_NAME: 'orders', GetCommand, PutCommand, UpdateCommand, DeleteCommand },
+  exports: {
+    client, db, TABLE_NAME: 'orders',
+    GetCommand, PutCommand, UpdateCommand, DeleteCommand,
+    CreateTableCommand, DeleteTableCommand, waitUntilTableExists, waitUntilTableNotExists,
+  },
 };
 
 // ---------- Siapkan handler ----------
@@ -108,6 +138,8 @@ let log = [];
 beforeEach((t) => {
   tabel.clear();
   errorBerikutnya = null;
+  tabelAda = false;
+  perintahTabel.length = 0;
   log = [];
   const simpan = (...args) => log.push(args.map(String).join(' '));
   t.mock.method(console, 'log', simpan);
@@ -307,4 +339,48 @@ test('kunci API tidak pernah tercetak di log', async () => {
   }
   // Log tetap berguna: berisi method, path, role, dan status.
   assert.match(semua, /"method":"PUT".*"role":"pelanggan".*"status":403/);
+});
+
+// ---------- Kelola tabel (aws lambda invoke) ----------
+
+test('action setupDatabase membuat tabel dan menunggu ACTIVE', async () => {
+  const r = await handler({ action: 'setupDatabase' });
+  assert.deepEqual(r, { ok: true, action: 'setupDatabase', table: 'orders', status: 'dibuat' });
+  assert.deepEqual(perintahTabel, ['CreateTableCommand', 'waitUntilTableExists']);
+  assert.equal(tabelAda, true);
+});
+
+test('action setupDatabase memakai ulang tabel yang sudah ada (aman diulang)', async () => {
+  tabelAda = true;
+  const r = await handler({ action: 'setupDatabase' });
+  assert.equal(r.ok, true);
+  assert.match(r.status, /sudah ada/);
+  assert.equal(tabelAda, true);
+});
+
+test('action deleteDatabase menghapus tabel; diulang tetap ok', async () => {
+  tabelAda = true;
+  const r1 = await handler({ action: 'deleteDatabase' });
+  assert.equal(r1.status, 'dihapus');
+  assert.equal(tabelAda, false);
+  assert.ok(perintahTabel.includes('waitUntilTableNotExists'));
+  const r2 = await handler({ action: 'deleteDatabase' });
+  assert.equal(r2.ok, true);
+  assert.match(r2.status, /tidak ada/);
+});
+
+test('action tidak dikenal dilempar sebagai error', async () => {
+  await assert.rejects(handler({ action: 'hapusSemua' }), /action tidak dikenal/);
+  await assert.rejects(handler({ action: 'constructor' }), /action tidak dikenal/);
+  assert.deepEqual(perintahTabel, []);
+});
+
+test('"action" dari Function URL diabaikan (tetap dicek sebagai HTTP)', async () => {
+  tabelAda = true;
+  const ev = permintaan('POST', '/orders', undefined, { action: 'deleteDatabase' });
+  ev.action = 'deleteDatabase';
+  const res = await handler(ev);
+  assert.equal(res.statusCode, 401);
+  assert.equal(tabelAda, true);
+  assert.deepEqual(perintahTabel, []);
 });

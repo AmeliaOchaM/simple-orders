@@ -10,14 +10,15 @@ Browser ──HTTPS──> Lambda Function URL (auth NONE)
                         ▼
                    Lambda OrdersFn ───────> DynamoDB tabel "orders"
                    (index.handler)              ▲
-                        │                       │ CreateTable (saat deploy)
+                        │                       │ CreateTable / DeleteTable
                         ▼                       │
-                   CloudWatch Logs        Lambda TableCreatorFn
-                                          (Custom Resource CloudFormation)
+                   CloudWatch Logs    aws lambda invoke {"action":"setupDatabase"}
+                                      (dari deploy.sh / teardown.sh)
 ```
 
-- **Satu Lambda (`OrdersFn`)** menyajikan halaman web (`GET /`, `/style.css`, `/app.js`) dan API `/orders`. Tidak perlu S3 website atau API Gateway.
-- **`TableCreatorFn`** membuat tabel lewat CloudFormation Custom Resource, karena user sandbox tidak boleh `CreateTable`.
+- **Satu Lambda (`OrdersFn`)** menyajikan halaman web (`GET /`, `/style.css`, `/app.js`) dan API `/orders`. Tidak perlu S3 atau API Gateway.
+- **Tanpa S3 dan tanpa Custom Resource.** CloudFormation hanya membuat fungsi (kode placeholder), Function URL, dan izin. `deploy.sh` mengunggah kode dengan `aws lambda update-function-code`, lalu membuat tabel dengan memanggil `OrdersFn` langsung (`{"action":"setupDatabase"}`). Cara ini dipakai karena user sandbox tidak boleh `CreateTable`, sedangkan `LabRole` boleh.
+- **Action tabel hanya lewat invoke langsung.** Event yang punya `requestContext` (dari Function URL) selalu diproses sebagai HTTP, jadi action tidak bisa dipicu dari internet.
 - **Autentikasi** memakai header `X-Api-Key`. Ada satu kunci per role (`KEY_PELANGGAN`, `KEY_PENJUAL`), dikirim sebagai parameter CloudFormation `NoEcho`, dan tidak pernah dicetak ke log.
 
 ## API
@@ -31,6 +32,8 @@ Semua rute `/orders` wajib memakai header `X-Api-Key`. Balasan berupa JSON, dan 
 | `PUT` | `/orders/{id}` | ❌ | ✅ | `200` pesanan setelah diubah |
 | `DELETE` | `/orders/{id}` | ❌ | ✅ | `200` `{"message","orderId"}` |
 | `GET` | `/`, `/style.css`, `/app.js` | publik | publik | halaman web |
+
+Selain rute HTTP, `OrdersFn` menerima dua action lewat `aws lambda invoke` (butuh kredensial AWS): `{"action":"setupDatabase"}` untuk membuat tabel (atau memakai ulang), dan `{"action":"deleteDatabase"}` untuk menghapus tabel.
 
 Urutan pengecekan:
 
@@ -79,19 +82,19 @@ src/
     getOrder.js             GET /orders/{id}
     updateOrder.js          PUT /orders/{id}
     deleteOrder.js          DELETE /orders/{id}
-    setupDatabase.js        Custom Resource TableCreator (buat/hapus tabel)
+    setupDatabase.js        action setupDatabase / deleteDatabase (buat/hapus tabel)
   utils/
     auth.js                 cek X-Api-Key + matriks role
-    dynamodb.js             DynamoDBDocumentClient + TABLE_NAME
+    dynamodb.js             DynamoDB client + DocumentClient + TABLE_NAME
     validate.js             validasi input pesanan
     response.js             helper balasan JSON
   web/
     index.html, style.css, app.js   halaman web (HTML + JS biasa)
-infra/template.yaml         CloudFormation: kedua Lambda, tabel, Function URL, izin
+infra/template.yaml         CloudFormation: OrdersFn (placeholder), Function URL, 2 izin
 scripts/
-  deploy.sh                 zip src/ -> S3 -> cloudformation deploy -> .env
+  deploy.sh                 cloudformation deploy -> update-function-code -> setupDatabase -> .env
   test-api.sh               tes end-to-end dengan curl (14 tes)
-  teardown.sh               hapus stack dan bucket kode
+  teardown.sh               deleteDatabase (kecuali RETAIN=true) -> hapus stack
 tests/orders.test.js        unit test (node:test + DynamoDB tiruan)
 docs/deployment-plan.md     rencana deploy, verifikasi, rollback, persistensi
 ```
@@ -100,14 +103,19 @@ docs/deployment-plan.md     rencana deploy, verifikasi, rollback, persistensi
 
 ```bash
 git clone <url-repo> simple-orders && cd simple-orders
-bash scripts/deploy.sh               # atau: RETAIN=true bash scripts/deploy.sh
+bash scripts/deploy.sh               # aman dijalankan berulang
 bash scripts/test-api.sh             # harap: 14 OK, 0 GAGAL
 cat .env                             # API_URL dan kedua kunci API
 ```
 
 Buka `API_URL` di browser, pilih role, lalu tempel kuncinya.
 
-Untuk membongkar: `bash scripts/teardown.sh`. Tabel ikut terhapus, kecuali deploy terakhir memakai `RETAIN=true`.
+Untuk membongkar:
+
+```bash
+bash scripts/teardown.sh               # hapus tabel (beserta data) + stack
+RETAIN=true bash scripts/teardown.sh   # simpan tabel; deploy ulang -> data tetap ada
+```
 
 Detail langkah, verifikasi, rollback, dan skenario persistensi ada di [docs/deployment-plan.md](docs/deployment-plan.md).
 
@@ -125,3 +133,4 @@ Yang diuji:
 - Alur `201`/`200`, `400` validasi, `404` pesanan tidak ada, dan `500` saat DynamoDB gagal
 - Urutan pengecekan
 - Kunci API tidak pernah muncul di log
+- Action `setupDatabase` / `deleteDatabase` (termasuk aman diulang), dan action yang dikirim lewat URL diabaikan

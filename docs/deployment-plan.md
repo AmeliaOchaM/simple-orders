@@ -1,6 +1,6 @@
 # Deployment Plan: Simple Orders
 
-Dokumen ini menjelaskan cara memasang, memverifikasi, dan membongkar Simple Orders di AWS Academy Sandbox.
+Dokumen ini menjelaskan cara memasang, memverifikasi, dan membongkar Simple Orders di AWS Academy Sandbox. Deploy ini **tidak memakai S3 dan tidak memakai Custom Resource**.
 
 ## 1. Lingkungan
 
@@ -15,30 +15,29 @@ Dokumen ini menjelaskan cara memasang, memverifikasi, dan membongkar Simple Orde
 
 ## 2. Daftar resource
 
-Semua resource dibuat oleh `infra/template.yaml`, kecuali bucket kode yang dibuat oleh `deploy.sh`.
-
-| Resource | Tipe | Fungsi |
+| Resource | Dibuat oleh | Fungsi |
 |---|---|---|
-| `simple-orders-code-<akun>` | S3 bucket | Menyimpan zip kode (`orders-<hash>.zip`). Dibuat `deploy.sh`, dihapus `teardown.sh`. |
-| `TableCreatorFn` | Lambda | Handler `handlers/setupDatabase.handler`. Membuat dan menghapus tabel karena user tidak boleh `CreateTable`. |
-| `OrdersTable` | Custom Resource | Meminta `TableCreatorFn` membuat tabel `orders`. |
-| `orders` | DynamoDB table | PK `orderId` (String), mode `PAY_PER_REQUEST`. |
-| `OrdersFn` | Lambda | Handler `index.handler`. API pesanan dan halaman web. |
-| `OrdersFnUrl` | Lambda Function URL | Endpoint publik, `AuthType: NONE`. |
-| `OrdersFnUrlPermission` | Lambda Permission | `lambda:InvokeFunctionUrl` untuk `*` (`FunctionUrlAuthType: NONE`). |
-| `OrdersFnInvokePermission` | Lambda Permission | `lambda:InvokeFunction` untuk `*`, hanya bila `InvokedViaFunctionUrl: true`. |
-| `/aws/lambda/<nama-fungsi>` | CloudWatch Log Group | Dibuat otomatis oleh Lambda saat pertama kali dipanggil. |
+| `OrdersFn` (Lambda) | CloudFormation | Handler `index.handler`. API pesanan, halaman web, dan pengelola tabel (action). Awalnya berisi kode placeholder inline, lalu kode asli diunggah `deploy.sh`. |
+| `OrdersFnUrl` (Function URL) | CloudFormation | Endpoint publik, `AuthType: NONE`. |
+| `OrdersFnUrlPermission` | CloudFormation | `lambda:InvokeFunctionUrl` untuk `*` (`FunctionUrlAuthType: NONE`). |
+| `OrdersFnInvokePermission` | CloudFormation | `lambda:InvokeFunction` untuk `*`, hanya bila `InvokedViaFunctionUrl: true`. |
+| Tabel DynamoDB `orders` | `deploy.sh`, lewat invoke `{"action":"setupDatabase"}` | PK `orderId` (String), mode `PAY_PER_REQUEST`. **Tidak** dikelola CloudFormation. |
+| Log group `/aws/lambda/<nama-fungsi>` | Lambda (otomatis) | Log setiap permintaan. |
 
-Parameter template:
+Parameter template: `KeyPelanggan` dan `KeyPenjual` (`NoEcho`, minimal 16 karakter), yang menjadi env var `KEY_PELANGGAN` dan `KEY_PENJUAL`. Env var `TABLE_NAME` bernilai tetap `orders`.
 
-| Parameter | Diisi oleh | Keterangan |
-|---|---|---|
-| `CodeBucket`, `CodeKey` | `deploy.sh` | Lokasi zip kode di S3. Dipakai kedua Lambda. |
-| `KeyPelanggan`, `KeyPenjual` | `deploy.sh` (dari `.env` atau acak) | `NoEcho`, minimal 16 karakter. Menjadi env var `KEY_PELANGGAN` dan `KEY_PENJUAL`. |
-| `RetainTableOnDelete` | `deploy.sh` (`RETAIN=true/false`) | `true` berarti tabel tidak ikut terhapus saat stack dihapus. |
-| `TableName` | default `orders` | Nama tabel. |
+Output: `FunctionUrl` dan `FunctionName`.
 
-Output: `FunctionUrl`, `TableName`, `TableArn`.
+### Mengapa tabel dibuat lewat invoke?
+
+User sandbox tidak boleh `dynamodb:CreateTable`, tapi `LabRole` boleh. Karena itu `deploy.sh` memanggil `OrdersFn` secara langsung:
+
+```bash
+aws lambda invoke --function-name <OrdersFn> --cli-binary-format raw-in-base64-out \
+  --payload '{"action":"setupDatabase"}' hasil.json
+```
+
+`src/index.js` mengenali panggilan ini karena event-nya berisi `action` dan **tidak** punya `requestContext`. Permintaan lewat Function URL selalu punya `requestContext`, jadi jalur ini tidak bisa dipicu dari internet. Invoke langsung juga butuh kredensial AWS, karena izin publik hanya berlaku lewat Function URL.
 
 ## 3. Langkah deploy (setiap sesi)
 
@@ -52,10 +51,16 @@ Output: `FunctionUrl`, `TableName`, `TableArn`.
    Di sesi berikutnya cukup `cd simple-orders && git pull`.
 4. Deploy:
    ```bash
-   bash scripts/deploy.sh               # biasa
-   RETAIN=true bash scripts/deploy.sh   # bila tabel harus selamat saat stack dihapus
+   bash scripts/deploy.sh
    ```
-   Skrip ini aman dijalankan berulang kali. Bila kode tidak berubah, CloudFormation menampilkan "No changes to deploy".
+   Yang dilakukan skrip:
+   - **a.** Membuat kunci acak bila belum ada di `.env`.
+   - **b.** Menjalankan `aws cloudformation deploy` (fungsi, URL, izin).
+   - **c.** Membuat zip `src/` di `build/orders.zip`, menjalankan `aws lambda update-function-code`, lalu `aws lambda wait function-updated`.
+   - **d.** Menjalankan `aws lambda invoke` dengan `{"action":"setupDatabase"}`: tabel dibuat, atau dipakai ulang bila sudah ada, lalu ditunggu sampai ACTIVE.
+   - **e.** Menyimpan `KEY_PELANGGAN`, `KEY_PENJUAL`, dan `API_URL` ke `.env`.
+
+   Skrip ini aman dijalankan berulang. Kunci lama dipakai lagi, kode diunggah ulang, dan tabel yang sudah ada tidak disentuh. Bila langkah d gagal, skrip berhenti dan menampilkan pesan error dari Lambda.
 5. Catat URL yang dicetak. Kunci API tersimpan di `.env` (`cat .env`).
 
 > `.env` berisi kunci rahasia. File ini ada di `.gitignore`. Jangan di-commit atau dibagikan.
@@ -68,7 +73,7 @@ Output: `FunctionUrl`, `TableName`, `TableArn`.
    bash scripts/test-api.sh
    ```
    Hasilnya tersimpan di `out/hasil-tes-<waktu>.txt`.
-2. **Halaman web.** Buka URL dari `.env` (`API_URL`) di browser.
+2. **Halaman web.** Buka `API_URL` di browser.
    - Role Pelanggan + `KEY_PELANGGAN`: buat pesanan, ID terisi otomatis, lalu tekan **Cek**.
    - Role Penjual + `KEY_PENJUAL`: cari ID itu, tekan **Tandai selesai** (status menjadi Selesai), lalu **Hapus**.
 3. **Status stack:**
@@ -78,8 +83,8 @@ Output: `FunctionUrl`, `TableName`, `TableArn`.
    ```
 4. **Log CloudWatch.** Setiap permintaan tercatat sebagai satu baris `{"method","path","role","status"}`, tanpa kunci:
    ```bash
-   FN=$(aws cloudformation describe-stack-resource --stack-name simple-orders \
-     --logical-resource-id OrdersFn --query StackResourceDetail.PhysicalResourceId --output text)
+   FN=$(aws cloudformation describe-stacks --stack-name simple-orders \
+     --query "Stacks[0].Outputs[?OutputKey=='FunctionName'].OutputValue" --output text)
    aws logs tail "/aws/lambda/$FN" --since 15m
    ```
 5. **Isi tabel:**
@@ -91,89 +96,90 @@ Output: `FunctionUrl`, `TableName`, `TableArn`.
 
 | Situasi | Yang terjadi / yang dilakukan |
 |---|---|
-| Update stack gagal | CloudFormation otomatis kembali ke versi sebelumnya (`UPDATE_ROLLBACK_COMPLETE`). Aplikasi lama tetap jalan. Perbaiki penyebabnya, lalu jalankan `deploy.sh` lagi. |
+| `cloudformation deploy` gagal saat update | CloudFormation otomatis kembali ke versi sebelumnya (`UPDATE_ROLLBACK_COMPLETE`). Perbaiki penyebabnya, lalu jalankan `deploy.sh` lagi. |
 | Pembuatan stack pertama gagal | Status menjadi `ROLLBACK_COMPLETE`. `deploy.sh` berikutnya otomatis menghapus stack itu lalu membuat ulang. |
-| Mencari penyebab | `aws cloudformation describe-stack-events --stack-name simple-orders --max-items 20 --query 'StackEvents[].[LogicalResourceId,ResourceStatus,ResourceStatusReason]' --output table` |
-| Tabel gagal dibuat | Lihat log `TableCreatorFn` (`aws logs tail /aws/lambda/<nama TableCreatorFn> --since 30m`). Pesan error ikut tampil di event stack. |
-| Kode baru bermasalah, tapi deploy sukses | Kembalikan kode ke commit sebelumnya, lalu deploy ulang. Zip lama punya hash yang sama, jadi Lambda kembali ke versi itu: `git checkout <commit-lama> -- src && bash scripts/deploy.sh`, lalu `git checkout HEAD -- src`. |
-| Semua kacau | `bash scripts/teardown.sh`, lalu `bash scripts/deploy.sh`. Data hilang kecuali deploy terakhir memakai `RETAIN=true`. |
+| Mencari penyebab di stack | `aws cloudformation describe-stack-events --stack-name simple-orders --max-items 20 --query 'StackEvents[].[LogicalResourceId,ResourceStatus,ResourceStatusReason]' --output table` |
+| `update-function-code` gagal | Stack tetap ada dan fungsi masih berisi kode lama (atau placeholder yang membalas 503). Jalankan `deploy.sh` lagi. |
+| `setupDatabase` gagal | `deploy.sh` berhenti dan mencetak `errorMessage` dari Lambda. Lihat detailnya dengan `aws logs tail "/aws/lambda/$FN" --since 15m`. |
+| Kode baru bermasalah | Unggah kode versi sebelumnya: `git checkout <commit-lama> -- src && bash scripts/deploy.sh`, lalu kembalikan dengan `git checkout HEAD -- src`. Data di tabel tidak terpengaruh. |
+| Semua kacau | `RETAIN=true bash scripts/teardown.sh`, lalu `bash scripts/deploy.sh`. Data tetap ada. Tanpa `RETAIN=true`, tabel ikut terhapus. |
 
 ## 6. Skenario persistensi
 
 ### A. Lambda di-restart: data tetap ada
 
-Data disimpan di DynamoDB, bukan di memori Lambda. Jadi cold start baru tidak menghapus pesanan.
+Data disimpan di DynamoDB, bukan di memori Lambda. Jadi instance Lambda baru (cold start) tidak menghapus pesanan.
 
 ```bash
 source .env
+FN=$(aws cloudformation describe-stacks --stack-name simple-orders \
+  --query "Stacks[0].Outputs[?OutputKey=='FunctionName'].OutputValue" --output text)
+
 # 1. Buat pesanan, catat ID-nya
 ID=$(curl -s -X POST "$API_URL/orders" -H "X-Api-Key: $KEY_PELANGGAN" \
   -H 'Content-Type: application/json' \
   -d '{"customerName":"Uji","item":"Teh","quantity":1}' | grep -o '"orderId":"[^"]*"' | cut -d'"' -f4)
 echo "$ID"
 
-# 2. Paksa cold start: ubah konfigurasi fungsi, sehingga semua instance lama dibuang
-FN=$(aws cloudformation describe-stack-resource --stack-name simple-orders \
-  --logical-resource-id OrdersFn --query StackResourceDetail.PhysicalResourceId --output text)
-aws lambda update-function-configuration --function-name "$FN" --description "restart $(date +%s)" >/dev/null
-aws lambda wait function-updated --function-name "$FN"
+# 2. Restart: unggah ulang kode, sehingga semua instance lama dibuang
+bash scripts/deploy.sh
 
 # 3. Pesanan masih ada (harap HTTP 200)
 curl -s -w '\n%{http_code}\n' "$API_URL/orders/$ID" -H "X-Api-Key: $KEY_PENJUAL"
 ```
 
-Langkah 2 mengubah `Description` di luar CloudFormation (*drift*). Ini tidak berbahaya, dan nilainya kembali sesuai template setelah stack dibuat ulang (teardown + deploy).
-
-### B. `RETAIN=true` + teardown + deploy ulang: data kembali
+### B. `RETAIN=true` teardown + deploy ulang: data tetap ada
 
 ```bash
-# 1. Deploy dengan RETAIN=true (harus deploy TERAKHIR sebelum teardown)
-RETAIN=true bash scripts/deploy.sh
 source .env
 
-# 2. Buat pesanan, catat ID
+# 1. Buat pesanan, catat ID
 ID=$(curl -s -X POST "$API_URL/orders" -H "X-Api-Key: $KEY_PELANGGAN" \
   -H 'Content-Type: application/json' \
   -d '{"customerName":"Persisten","item":"Kopi","quantity":1}' | grep -o '"orderId":"[^"]*"' | cut -d'"' -f4)
 echo "$ID"
 
-# 3. Bongkar semuanya. Tabel harus tetap ada.
-bash scripts/teardown.sh
+# 2. Hapus stack, tapi SIMPAN tabel
+RETAIN=true bash scripts/teardown.sh
 aws dynamodb describe-table --table-name orders --query Table.TableStatus   # "ACTIVE"
 
-# 4. Deploy ulang. TableCreator melihat tabel sudah ada dan memakainya lagi.
-RETAIN=true bash scripts/deploy.sh
+# 3. Deploy ulang. setupDatabase melihat tabel sudah ada dan memakainya lagi.
+bash scripts/deploy.sh
 source .env   # API_URL baru (Function URL dibuat ulang), kunci tetap sama
 
-# 5. Pesanan lama kembali (harap HTTP 200)
+# 4. Pesanan lama masih ada (harap HTTP 200)
 curl -s -w '\n%{http_code}\n' "$API_URL/orders/$ID" -H "X-Api-Key: $KEY_PENJUAL"
 ```
 
-Untuk membersihkan tabel yang disimpan, deploy sekali lagi tanpa `RETAIN` (`bash scripts/deploy.sh`), lalu `bash scripts/teardown.sh`.
+Langkah 2 memanggil `describe-table` dengan kredensial user. Bila ditolak oleh sandbox, lewati saja. Langkah 4 tetap membuktikan data selamat.
+
+Bila teardown dijalankan **tanpa** `RETAIN=true`, `teardown.sh` lebih dulu memanggil `{"action":"deleteDatabase"}` sehingga tabel dan datanya hilang. Deploy ulang lalu membuat tabel kosong, dan pesanan lama dibalas 404.
 
 ## 7. Batasan sandbox
 
 - **API Gateway dan Cognito diblokir.** Karena itu dipakai Lambda Function URL dengan `AuthType: NONE`, dan autentikasi memakai header `X-Api-Key` yang dicek di kode.
-- **Tidak bisa membuat IAM role.** Kedua Lambda memakai `LabRole`, yang hak aksesnya lebih luas dari yang dibutuhkan (tidak *least privilege*).
-- **User tidak boleh `dynamodb:CreateTable`.** Tabel dibuat oleh `TableCreatorFn` (Custom Resource) yang berjalan dengan `LabRole`.
+- **Tidak bisa membuat IAM role.** `OrdersFn` memakai `LabRole`, yang hak aksesnya lebih luas dari yang dibutuhkan (tidak *least privilege*), termasuk hak membuat dan menghapus tabel.
+- **User tidak boleh `dynamodb:CreateTable`.** Tabel dibuat oleh `OrdersFn` sendiri lewat invoke `setupDatabase`.
+- **Tabel di luar CloudFormation.** Menghapus stack tidak menghapus tabel. Tabel dihapus oleh `teardown.sh` (action `deleteDatabase`), kecuali `RETAIN=true`. Bila stack dihapus manual lewat konsol, tabel `orders` tertinggal dan harus dihapus manual.
+- **Kode di luar CloudFormation.** Template hanya berisi kode placeholder. Kalau stack di-deploy tanpa `deploy.sh`, URL membalas 503 "Kode belum diunggah".
 - **Function URL publik butuh dua izin**: `lambda:InvokeFunctionUrl` dan `lambda:InvokeFunction` (`InvokedViaFunctionUrl`).
 - **Kunci API dibagikan per role**, bukan per pengguna. Tidak ada login, dan siapa pun yang tahu kunci bisa memakai role itu.
 - **Kredensial sandbox berlaku per sesi.** Bila sesi habis, buka ulang CloudShell dari sesi baru. Resource biasanya tetap ada antarsesi, tapi hilang bila sandbox di-reset. Karena itu, salin `.env` ke tempat aman.
-- **Nama tabel `orders` tetap.** Bila tabel `orders` sudah ada sebelumnya, tabel itu dipakai, dan ikut terhapus saat teardown tanpa `RETAIN=true`.
+- **Nama tabel `orders` tetap.** Bila tabel `orders` sudah ada sebelumnya, tabel itu dipakai.
 - **Tidak ada daftar semua pesanan** (`GET /orders`), sesuai spesifikasi. Pesanan dicari dengan ID.
 
 ## 8. Checklist screenshot
 
-- [ ] Output `bash scripts/deploy.sh` sampai baris "Selesai" dan URL aplikasi (jangan tampilkan isi `.env`)
-- [ ] CloudFormation: stack `simple-orders` berstatus `CREATE_COMPLETE` / `UPDATE_COMPLETE`, tab **Resources**
+- [ ] Output `bash scripts/deploy.sh` sampai baris "Selesai", termasuk hasil `setupDatabase` (jangan tampilkan isi `.env`)
+- [ ] CloudFormation: stack `simple-orders` berstatus `CREATE_COMPLETE` / `UPDATE_COMPLETE`, tab **Resources** (4 resource)
 - [ ] CloudFormation tab **Parameters**: `KeyPelanggan` dan `KeyPenjual` tampil sebagai `****`
-- [ ] Lambda `OrdersFn`: tab **Configuration > Function URL** (Auth type NONE)
+- [ ] Lambda `OrdersFn`: tab **Code** (kode asli, bukan placeholder) dan **Configuration > Function URL** (Auth type NONE)
 - [ ] DynamoDB: tabel `orders` (ACTIVE) dan **Explore items** berisi pesanan
 - [ ] Halaman web: pelanggan berhasil membuat pesanan (ID tampil)
 - [ ] Halaman web: penjual mencari pesanan, status Selesai setelah "Tandai selesai"
 - [ ] Halaman web: pesan error, misalnya `Error 401` dengan kunci salah
 - [ ] Output `bash scripts/test-api.sh`: `Total: 14 tes, 14 OK, 0 GAGAL`
 - [ ] CloudWatch Logs `OrdersFn`: baris log JSON tanpa kunci API
-- [ ] Skenario A: HTTP 200 setelah restart Lambda
-- [ ] Skenario B: `describe-table` ACTIVE setelah teardown, dan HTTP 200 setelah deploy ulang
-- [ ] Output `bash scripts/teardown.sh`
+- [ ] Skenario A: HTTP 200 setelah deploy ulang (restart Lambda)
+- [ ] Skenario B: output `RETAIN=true bash scripts/teardown.sh`, lalu HTTP 200 setelah deploy ulang
+- [ ] Output `bash scripts/teardown.sh` (tabel dan stack terhapus)
