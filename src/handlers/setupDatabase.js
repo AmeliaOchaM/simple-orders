@@ -52,7 +52,11 @@ async function buatTabel(nama) {
 }
 
 // Hapus tabel. Abaikan bila tabel sudah tidak ada.
-async function hapusTabel(nama) {
+async function hapusTabel(nama, simpan) {
+  if (simpan) {
+    console.log('RetainOnDelete=true, tabel tidak dihapus:', nama);
+    return;
+  }
   try {
     await client.send(new DeleteTableCommand({ TableName: nama }));
   } catch (e) {
@@ -66,7 +70,9 @@ exports.handler = async (event, context) => {
   // PhysicalResourceId = nama tabel. Saat Delete, pakai nama yang tercatat di stack.
   const idFisik = event.RequestType === 'Delete' ? event.PhysicalResourceId : nama;
   try {
-    if (event.RequestType === 'Delete') await hapusTabel(idFisik);
+    // RetainOnDelete dikirim CloudFormation sebagai teks "true"/"false".
+    const simpan = event.ResourceProperties.RetainOnDelete === 'true';
+    if (event.RequestType === 'Delete') await hapusTabel(idFisik, simpan);
     else await buatTabel(nama); // Create atau Update
     await balasCfn(event, context, 'SUCCESS', idFisik);
   } catch (e) {

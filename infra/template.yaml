@@ -26,6 +26,13 @@ Parameters:
     NoEcho: true
     MinLength: 16
     Description: Kunci API untuk role penjual (rahasia).
+  RetainTableOnDelete:
+    Type: String
+    Default: "false"
+    AllowedValues: ["true", "false"]
+    Description: >
+      "true" = tabel (beserta datanya) TIDAK ikut terhapus saat stack dihapus,
+      dan dipakai ulang saat stack dibuat lagi.
 
 Resources:
   # ---------------------------------------------------------------------------
@@ -55,6 +62,7 @@ Resources:
     Properties:
       ServiceToken: !GetAtt TableCreatorFn.Arn
       TableName: !Ref TableName
+      RetainOnDelete: !Ref RetainTableOnDelete
 
   # ---------------------------------------------------------------------------
   # Lambda utama: API pesanan + halaman web. Log otomatis ke CloudWatch.
